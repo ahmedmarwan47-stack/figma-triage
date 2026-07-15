@@ -13,8 +13,8 @@
     "//extraHandles": "Extra names/aliases that count as a mention of you, in addition to your Figma handle from GET /v1/me.",
     "extraHandles": [],
 
-    "//includeAllUnresolved": "If true, include every unresolved comment (not just ones mentioning you). Noisy — leave false.",
-    "includeAllUnresolved": false
+    "//includeAllUnresolved": "If true, include every unresolved comment (not just ones mentioning you). Noisy — leave false. Temporarily TRUE for the first test run.",
+    "includeAllUnresolved": true
   },
 
   "slack": {

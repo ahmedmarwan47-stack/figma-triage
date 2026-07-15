@@ -282,16 +282,29 @@ async function main() {
     );
   }
 
-  // Publish the day's jobs for the plugin to fetch.
+  // Full triage record (all categories, including the drafts that don't become
+  // plugin jobs — clarification replies, creative options). The plugin ignores
+  // `report` and only reads `jobs`; this is for inspection + a durable record.
+  const report = [];
+  for (const cat of ["mechanical", "creative", "clarification", "not_for_ahmed"]) {
+    for (const it of buckets[cat]) {
+      report.push({
+        category: cat,
+        file: it.fileName,
+        author: it.commentAuthor,
+        comment: it.commentText,
+        rationale: it.rationale,
+        jobTitle: it.verdict.job?.title ?? null,
+        options: (it.verdict.options ?? []).map((o) => o.label),
+        reply: it.verdict.reply ?? null,
+      });
+    }
+  }
+
+  const payload = { date: today, generatedAt: now.toISOString(), jobs, report };
   await mkdir(JOBS_DIR, { recursive: true });
-  await writeFile(
-    join(JOBS_DIR, `${today}.json`),
-    JSON.stringify({ date: today, generatedAt: now.toISOString(), jobs }, null, 2),
-  );
-  await writeFile(
-    join(JOBS_DIR, "latest.json"),
-    JSON.stringify({ date: today, generatedAt: now.toISOString(), jobs }, null, 2),
-  );
+  await writeFile(join(JOBS_DIR, `${today}.json`), JSON.stringify(payload, null, 2));
+  await writeFile(join(JOBS_DIR, "latest.json"), JSON.stringify(payload, null, 2));
 
   // Advance state (committed back by the Action).
   await writeFile(

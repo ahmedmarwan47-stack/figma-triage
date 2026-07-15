@@ -1,0 +1,27 @@
+{
+  "timezone": "Africa/Cairo",
+  "runAtHour": 14,
+  "lookbackHoursFirstRun": 24,
+
+  "figma": {
+    "//teamIds": "TODO(config): paste team IDs (the number in figma.com/files/team/<ID>/...). Auto-discovers every file in the team.",
+    "teamIds": [],
+
+    "//fileKeys": "Explicit files to watch (the code in figma.com/design/<KEY>/...). Seeded with the El Alsson case-study file.",
+    "fileKeys": ["PlPSqmNnF1SEaZZn975sSz"],
+
+    "//extraHandles": "Extra names/aliases that count as a mention of you, in addition to your Figma handle from GET /v1/me.",
+    "extraHandles": [],
+
+    "//includeAllUnresolved": "If true, include every unresolved comment (not just ones mentioning you). Noisy — leave false.",
+    "includeAllUnresolved": false
+  },
+
+  "slack": {
+    "//channelLabel": "Cosmetic — shown in logs. The real destination is the SLACK_WEBHOOK_URL secret.",
+    "channelLabel": "#figma-triage"
+  },
+
+  "//jobsBaseRawUrl": "TODO(config): raw base URL the Figma plugin fetches the day's jobs from, e.g. https://raw.githubusercontent.com/<owner>/<repo>/main/jobs . Repo can be public — it holds no secrets (those live in GitHub Actions secrets).",
+  "jobsBaseRawUrl": "https://raw.githubusercontent.com/ahmedmarwan47-stack/figma-triage/main/jobs"
+}

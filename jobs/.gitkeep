@@ -1,0 +1,2 @@
+# The reporter writes jobs/YYYY-MM-DD.json here each run.
+# The Figma plugin fetches the latest one and applies the drafted edits.

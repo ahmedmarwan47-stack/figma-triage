@@ -1,0 +1,17 @@
+{
+  "name": "figma-triage",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Daily Figma comment triage — discovers unresolved comments mentioning Ahmed, classifies + drafts with Claude, posts a Slack digest, and publishes apply-ready jobs for the companion Figma plugin.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "triage": "node reporter/index.mjs",
+    "triage:force": "FORCE_RUN=1 node reporter/index.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.70.0"
+  }
+}

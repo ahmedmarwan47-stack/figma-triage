@@ -1,0 +1,116 @@
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 12px/1.45 Inter, -apple-system, sans-serif; margin: 0; padding: 12px; }
+  h2 { font-size: 12px; margin: 0 0 8px; text-transform: uppercase; letter-spacing: .04em; opacity: .6; }
+  .row { display: flex; gap: 6px; margin-bottom: 10px; }
+  input { flex: 1; padding: 6px 8px; border: 1px solid rgba(128,128,128,.4); border-radius: 6px; font: inherit; }
+  button { padding: 6px 10px; border: 0; border-radius: 6px; background: #0d99ff; color: #fff; font: inherit; cursor: pointer; }
+  button.secondary { background: rgba(128,128,128,.18); color: inherit; }
+  button:disabled { opacity: .5; cursor: default; }
+  .card { border: 1px solid rgba(128,128,128,.28); border-radius: 8px; padding: 10px; margin-bottom: 10px; }
+  .card img { width: 100%; max-height: 140px; object-fit: contain; border-radius: 4px; background: rgba(128,128,128,.08); margin-bottom: 8px; }
+  .tag { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 999px; margin-bottom: 6px; }
+  .tag.mechanical { background: #e6f4ea; color: #1a7f37; }
+  .tag.creative { background: #fdeede; color: #a35b00; }
+  .comment { opacity: .75; margin: 0 0 6px; }
+  .title { font-weight: 600; margin: 0 0 6px; }
+  .muted { opacity: .6; }
+  .empty { opacity: .6; padding: 24px 8px; text-align: center; }
+  .cardfoot { display: flex; justify-content: flex-end; margin-top: 6px; }
+  @media (prefers-color-scheme: dark) {
+    .tag.mechanical { background: #123a20; color: #4ac26b; }
+    .tag.creative { background: #3a2a12; color: #e0a34a; }
+  }
+</style>
+
+<div class="row">
+  <input id="base" placeholder="jobs base URL, e.g. https://raw.githubusercontent.com/owner/repo/main/jobs" />
+  <button id="load">Load</button>
+</div>
+<div class="row">
+  <button id="applyAll" class="secondary" disabled>Apply all</button>
+  <span id="status" class="muted" style="align-self:center"></span>
+</div>
+
+<h2 id="heading" style="display:none">Today’s drafts</h2>
+<div id="list"></div>
+
+<script>
+  let fileKey = null;
+  let jobs = [];
+
+  const $ = (id) => document.getElementById(id);
+  const post = (msg) => parent.postMessage({ pluginMessage: msg }, "*");
+
+  $("load").onclick = () => loadJobs();
+  $("base").onchange = () => post({ type: "saveBase", jobsBaseUrl: $("base").value.trim() });
+  $("applyAll").onclick = () => {
+    for (const j of jobs) post({ type: "apply", job: j });
+    setStatus(`Applying ${jobs.length}…`);
+  };
+
+  function setStatus(t) { $("status").textContent = t || ""; }
+
+  async function loadJobs() {
+    const base = $("base").value.trim().replace(/\/$/, "");
+    if (!base) return setStatus("Set a jobs base URL first.");
+    post({ type: "saveBase", jobsBaseUrl: base });
+    setStatus("Loading…");
+    try {
+      const res = await fetch(`${base}/latest.json`, { cache: "no-store" });
+      if (!res.ok) throw new Error(res.status + " " + res.statusText);
+      const data = await res.json();
+      const all = data.jobs || [];
+      jobs = all.filter((j) => !fileKey || j.fileKey === fileKey);
+      render(all.length);
+      setStatus(`${jobs.length} for this file (${data.date}).`);
+    } catch (e) {
+      setStatus("Load failed: " + e.message);
+    }
+  }
+
+  function render(totalAllFiles) {
+    const list = $("list");
+    list.innerHTML = "";
+    $("heading").style.display = jobs.length ? "block" : "none";
+    $("applyAll").disabled = jobs.length === 0;
+    if (!jobs.length) {
+      list.innerHTML = `<div class="empty">No drafts for this file.${
+        totalAllFiles ? ` (${totalAllFiles} exist for other files.)` : ""
+      }</div>`;
+      return;
+    }
+    jobs.forEach((j, i) => {
+      const card = document.createElement("div");
+      card.className = "card";
+      const title = j.job?.title || (j.category === "creative" ? "Direction options" : "Edit");
+      card.innerHTML = `
+        <span class="tag ${j.category}">${j.category}</span>
+        ${j.imageUrl ? `<img src="${j.imageUrl}" alt="" />` : ""}
+        <p class="title">${escapeHtml(title)}</p>
+        <p class="comment">"${escapeHtml(j.commentText || "")}"</p>
+        <div class="cardfoot"><button data-i="${i}">Apply</button></div>`;
+      card.querySelector("button").onclick = () => {
+        post({ type: "apply", job: j });
+        setStatus("Applying: " + title);
+      };
+      list.appendChild(card);
+    });
+  }
+
+  function escapeHtml(s) {
+    return (s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  }
+
+  onmessage = (e) => {
+    const msg = e.data.pluginMessage;
+    if (!msg) return;
+    if (msg.type === "init") {
+      fileKey = msg.fileKey;
+      if (msg.jobsBaseUrl) $("base").value = msg.jobsBaseUrl;
+      if (msg.jobsBaseUrl) loadJobs();
+    } else if (msg.type === "applied") {
+      setStatus(msg.ok ? `✓ ${msg.title}` : `✗ ${msg.title}: ${msg.error}`);
+    }
+  };
+</script>

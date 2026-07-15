@@ -1,0 +1,16 @@
+{
+  "name": "Claude Comments",
+  "id": "figma-triage-claude-comments",
+  "api": "1.0.0",
+  "main": "code.js",
+  "ui": "ui.html",
+  "editorType": ["figma"],
+  "documentAccess": "dynamic-page",
+  "networkAccess": {
+    "allowedDomains": [
+      "https://raw.githubusercontent.com",
+      "https://gist.githubusercontent.com"
+    ],
+    "reasoning": "Fetches the day's triage jobs published by the reporter."
+  }
+}

@@ -1,0 +1,55 @@
+name: Figma comment triage
+
+on:
+  schedule:
+    # UTC-only cron. 14:00 Africa/Cairo is 12:00 UTC in winter (UTC+2) and
+    # 11:00 UTC in summer (UTC+3), so we fire at both and let the reporter's
+    # local-hour guard pick the right one. Weekdays only.
+    - cron: "0 11,12 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Run now, ignoring the 2pm-Cairo / already-ran-today guards"
+        type: boolean
+        default: false
+
+# Needed to commit state.json + jobs/*.json back to the repo.
+permissions:
+  contents: write
+
+concurrency:
+  group: figma-triage
+  cancel-in-progress: false
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install deps
+        run: npm install --no-audit --no-fund
+
+      - name: Run triage
+        env:
+          FIGMA_TOKEN: ${{ secrets.FIGMA_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          FORCE_RUN: ${{ inputs.force && '1' || '' }}
+        run: npm run triage
+
+      - name: Commit state + jobs
+        run: |
+          git config user.name "figma-triage-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add reporter/state.json jobs/
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "triage: $(date -u +%Y-%m-%d) run"
+            git push
+          fi

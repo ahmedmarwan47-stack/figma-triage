@@ -11,7 +11,5 @@
     "triage": "node reporter/index.mjs",
     "triage:force": "FORCE_RUN=1 node reporter/index.mjs"
   },
-  "dependencies": {
-    "@anthropic-ai/sdk": "^0.70.0"
-  }
+  "dependencies": {}
 }

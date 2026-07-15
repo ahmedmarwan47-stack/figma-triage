@@ -152,8 +152,8 @@ async function main() {
 
   const token = process.env.FIGMA_TOKEN;
   if (!token) throw new Error("FIGMA_TOKEN is not set.");
-  if (!process.env.ANTHROPIC_API_KEY)
-    throw new Error("ANTHROPIC_API_KEY is not set.");
+  // The Claude brain runs via the `claude` CLI — authenticated by
+  // CLAUDE_CODE_OAUTH_TOKEN in CI, or a logged-in session locally.
 
   const tz = config.timezone ?? "Africa/Cairo";
   const now = new Date();

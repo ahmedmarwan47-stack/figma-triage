@@ -34,10 +34,14 @@ jobs:
       - name: Install deps
         run: npm install --no-audit --no-fund
 
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
       - name: Run triage
         env:
           FIGMA_TOKEN: ${{ secrets.FIGMA_TOKEN }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Draws on the Claude subscription — generated with `claude setup-token`.
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           FORCE_RUN: ${{ inputs.force && '1' || '' }}
         run: npm run triage

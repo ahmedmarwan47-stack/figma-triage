@@ -33,8 +33,10 @@ The repo can be **public** — it holds no secrets (those live in Actions secret
 ### 3. Add three GitHub Actions secrets
 Repo → Settings → Secrets and variables → Actions → New repository secret:
 - `FIGMA_TOKEN` — Figma → Settings → Security → Personal access tokens.
-- `ANTHROPIC_API_KEY` — a Claude API key.
+- `CLAUDE_CODE_OAUTH_TOKEN` — run `claude setup-token` locally (needs Claude Code + a Pro/Max subscription); this draws on your **subscription usage**, not a metered API key.
 - `SLACK_WEBHOOK_URL` — see next step.
+
+> The classify/draft step runs the `claude` CLI headlessly (installed in the workflow). No `ANTHROPIC_API_KEY` / separate API billing.
 
 ### 4. Slack incoming webhook
 Create a private channel (e.g. `#figma-triage`), add the **Incoming Webhooks** app to it, copy the webhook URL → that's `SLACK_WEBHOOK_URL`. No scopes to manage.
@@ -50,10 +52,9 @@ Figma desktop → menu → **Plugins → Development → Import plugin from mani
 ## Run it locally
 ```bash
 cd figma-triage
-npm install
-FORCE_RUN=1 FIGMA_TOKEN=… ANTHROPIC_API_KEY=… SLACK_WEBHOOK_URL=… npm run triage
+FORCE_RUN=1 FIGMA_TOKEN=… SLACK_WEBHOOK_URL=… npm run triage
 ```
-`FORCE_RUN=1` bypasses the 2pm-Cairo and already-ran-today guards. Without `SLACK_WEBHOOK_URL` the digest prints to stdout.
+Locally the `claude` CLI uses your logged-in session, so no token env var is needed (just be logged into Claude Code). `FORCE_RUN=1` bypasses the 2pm-Cairo and already-ran-today guards. Without `SLACK_WEBHOOK_URL` the digest prints to stdout.
 
 Trigger the cloud job on demand: Actions → **Figma comment triage** → Run workflow → tick *force*.
 

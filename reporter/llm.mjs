@@ -1,18 +1,12 @@
-// Classification + drafting via the official Anthropic SDK (Claude Opus 4.8).
-// One call per comment. Returns a structured verdict the reporter turns into
-// a Slack digest and apply-ready plugin jobs.
+// Classification + drafting via the Claude Code CLI in headless print mode.
+// This draws on Ahmed's Claude subscription (CLAUDE_CODE_OAUTH_TOKEN in CI,
+// or his logged-in session locally) — no separate API billing.
+// One call per comment. Returns a structured verdict.
 
-import Anthropic from "@anthropic-ai/sdk";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 
-const MODEL = "claude-opus-4-8";
-
-// Lazily constructed so importing this module doesn't require ANTHROPIC_API_KEY
-// (lets index.mjs surface its own friendly env-var error first).
-let _client = null;
-function client() {
-  if (!_client) _client = new Anthropic(); // reads ANTHROPIC_API_KEY from env
-  return _client;
-}
+const run = promisify(execFile);
 
 // The op vocabulary here MUST stay in sync with plugin/code.js — the plugin
 // only knows how to execute these ops. Keep them declarative (no raw JS).
@@ -78,8 +72,6 @@ Classify and draft per your instructions. Respond with only the JSON object.`;
 }
 
 function parseVerdict(text) {
-  // The model is instructed to return only JSON; be defensive and extract the
-  // first {...} block in case it adds anything around it.
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
   if (start === -1 || end === -1) {
@@ -88,32 +80,40 @@ function parseVerdict(text) {
   return JSON.parse(text.slice(start, end + 1));
 }
 
-export async function classifyAndDraft(input) {
-  const res = await client().messages.create({
-    model: MODEL,
-    max_tokens: 4000,
-    thinking: { type: "adaptive" },
-    output_config: { effort: "medium" },
-    system: SYSTEM_PROMPT,
-    messages: [{ role: "user", content: buildUserPrompt(input) }],
+// Headless call to Claude Code. --output-format json wraps the answer in a
+// result envelope; we pull `.result` then extract our JSON from it.
+async function callClaude(userPrompt) {
+  const args = [
+    "-p",
+    userPrompt,
+    "--output-format",
+    "json",
+    "--system-prompt",
+    SYSTEM_PROMPT,
+  ];
+  const { stdout } = await run("claude", args, {
+    maxBuffer: 20 * 1024 * 1024,
+    env: process.env,
   });
+  const envelope = JSON.parse(stdout);
+  if (envelope.is_error) {
+    throw new Error(envelope.result || "claude returned an error");
+  }
+  return envelope.result ?? "";
+}
 
-  const text = res.content
-    .filter((b) => b.type === "text")
-    .map((b) => b.text)
-    .join("");
-
+export async function classifyAndDraft(input) {
   try {
+    const text = await callClaude(buildUserPrompt(input));
     return parseVerdict(text);
   } catch (err) {
-    // Never crash the whole run on one bad parse — degrade to a clarification.
+    // Never crash the whole run on one bad call — degrade to a clarification.
     return {
       category: "clarification",
-      rationale: `Could not parse the model's verdict (${err.message}).`,
+      rationale: `Auto-triage failed for this one (${err.message}).`,
       job: null,
       options: null,
-      reply:
-        "I couldn't auto-triage this one — flagging it for a manual look.",
+      reply: "I couldn't auto-triage this one — flagging it for a manual look.",
     };
   }
 }

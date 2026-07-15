@@ -1,17 +1,6 @@
 {
   "date": "2026-07-15",
-  "generatedAt": "2026-07-15T17:31:52.581Z",
+  "generatedAt": "2026-07-15T17:33:34.318Z",
   "jobs": [],
-  "report": [
-    {
-      "category": "clarification",
-      "file": "PlPSqmNnF1SEaZZn975sSz",
-      "author": "Ahmed Marwan",
-      "comment": "change the title to \"claude test\"\n@Ahmed Marwan",
-      "rationale": "Auto-triage failed for this one (claude exited 1: ).",
-      "jobTitle": null,
-      "options": [],
-      "reply": "I couldn't auto-triage this one — flagging it for a manual look."
-    }
-  ]
+  "report": []
 }

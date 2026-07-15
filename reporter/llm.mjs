@@ -3,10 +3,7 @@
 // or his logged-in session locally) — no separate API billing.
 // One call per comment. Returns a structured verdict.
 
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-
-const run = promisify(execFile);
+import { spawn } from "node:child_process";
 
 // The op vocabulary here MUST stay in sync with plugin/code.js — the plugin
 // only knows how to execute these ops. Keep them declarative (no raw JS).
@@ -82,24 +79,35 @@ function parseVerdict(text) {
 
 // Headless call to Claude Code. --output-format json wraps the answer in a
 // result envelope; we pull `.result` then extract our JSON from it.
-async function callClaude(userPrompt) {
-  const args = [
-    "-p",
-    userPrompt,
-    "--output-format",
-    "json",
-    "--system-prompt",
-    SYSTEM_PROMPT,
-  ];
-  const { stdout } = await run("claude", args, {
-    maxBuffer: 20 * 1024 * 1024,
-    env: process.env,
+// stdin is set to /dev/null ("ignore") so the CLI doesn't sit waiting on a
+// non-TTY pipe in CI (which otherwise fails the call).
+function callClaude(userPrompt) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      "claude",
+      ["-p", userPrompt, "--output-format", "json", "--system-prompt", SYSTEM_PROMPT],
+      { stdio: ["ignore", "pipe", "pipe"], env: process.env },
+    );
+    let out = "";
+    let err = "";
+    child.stdout.on("data", (d) => (out += d));
+    child.stderr.on("data", (d) => (err += d));
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code !== 0) {
+        return reject(new Error(`claude exited ${code}: ${err.trim().slice(0, 400)}`));
+      }
+      try {
+        const envelope = JSON.parse(out);
+        if (envelope.is_error) {
+          return reject(new Error(envelope.result || "claude returned an error"));
+        }
+        resolve(envelope.result ?? "");
+      } catch (e) {
+        reject(new Error(`bad claude json: ${e.message} :: ${out.slice(0, 200)}`));
+      }
+    });
   });
-  const envelope = JSON.parse(stdout);
-  if (envelope.is_error) {
-    throw new Error(envelope.result || "claude returned an error");
-  }
-  return envelope.result ?? "";
 }
 
 export async function classifyAndDraft(input) {

@@ -29,11 +29,26 @@ figma.ui.onmessage = async (msg) => {
       figma.ui.postMessage({ type: "applied", ok: true, title });
       figma.notify(`Applied: ${title}`);
     } catch (err) {
-      figma.ui.postMessage({ type: "applied", ok: false, title, error: err.message });
-      figma.notify(`Failed: ${err.message}`, { error: true });
+      // Some Figma Plugin API rejections don't carry a .message — fall back to
+      // stringifying so we never surface "Failed: undefined" with no clue.
+      const errMsg = errorMessage(err);
+      console.error("[Claude Comments] apply failed:", err);
+      figma.ui.postMessage({ type: "applied", ok: false, title, error: errMsg });
+      figma.notify(`Failed: ${errMsg}`, { error: true });
     }
   }
 };
+
+function errorMessage(err) {
+  if (!err) return "unknown error";
+  if (typeof err === "string") return err;
+  if (err.message) return err.message;
+  try {
+    return JSON.stringify(err);
+  } catch (_) {
+    return String(err);
+  }
+}
 
 // ---- style + font resolution ----------------------------------------------
 
@@ -111,15 +126,30 @@ async function makeCaption(chars, textStyles, preferred = "Caption/m") {
 
 // ---- op matching -----------------------------------------------------------
 
+function normalizeWs(s) {
+  // Collapse Figma's soft returns ( ), hard returns, and multi-space runs
+  // so `characters.includes(snippet)` doesn't miss because of wrapping.
+  return String(s ?? "").replace(/[ \s]+/g, " ").trim();
+}
+
 function findMatch(root, match) {
   if (!match) return root;
-  let hit = root.findOne
-    ? root.findOne((n) => n.name === match)
-    : null;
+  const target = String(match);
+  // 1. exact layer-name match
+  let hit = root.findOne ? root.findOne((n) => n.name === target) : null;
   if (hit) return hit;
-  // fall back to a text node whose content contains the snippet
+  // 2. case-insensitive layer-name match
   if (root.findAll) {
-    hit = root.findAll((n) => n.type === "TEXT" && n.characters.includes(match))[0];
+    const lc = target.toLowerCase();
+    hit = root.findAll((n) => n.name && n.name.toLowerCase() === lc)[0];
+    if (hit) return hit;
+  }
+  // 3. text-content match, whitespace-normalized so \n /   don't hide it
+  const targetNorm = normalizeWs(target).toLowerCase();
+  if (root.findAll && targetNorm) {
+    hit = root.findAll(
+      (n) => n.type === "TEXT" && normalizeWs(n.characters).toLowerCase().includes(targetNorm),
+    )[0];
   }
   return hit || null;
 }
@@ -191,33 +221,38 @@ async function applyJob(entry) {
     frame.appendChild(root);
   }
 
-  for (const op of ops) {
-    switch (op.op) {
-      case "duplicateTarget":
-        root = await cloneTarget(targetId);
-        frame.appendChild(root);
-        break;
-      case "setText":
-        await setText(root || frame, op.match, op.characters);
-        break;
-      case "setFillStyle":
-        await setFillStyle(root || frame, op.match, op.styleName, paints);
-        break;
-      case "setTextStyle":
-        await setTextStyle(root || frame, op.match, op.textStyleName, op.colorStyleName, texts, paints);
-        break;
-      case "removeNode": {
-        const n = findMatch(root || frame, op.match);
-        if (n) n.remove();
-        break;
+  for (let i = 0; i < ops.length; i++) {
+    const op = ops[i];
+    try {
+      switch (op.op) {
+        case "duplicateTarget":
+          root = await cloneTarget(targetId);
+          frame.appendChild(root);
+          break;
+        case "setText":
+          await setText(root || frame, op.match, op.characters);
+          break;
+        case "setFillStyle":
+          await setFillStyle(root || frame, op.match, op.styleName, paints);
+          break;
+        case "setTextStyle":
+          await setTextStyle(root || frame, op.match, op.textStyleName, op.colorStyleName, texts, paints);
+          break;
+        case "removeNode": {
+          const n = findMatch(root || frame, op.match);
+          if (n) n.remove();
+          break;
+        }
+        case "cloneNode": {
+          const n = findMatch(root || frame, op.match);
+          if (n && "clone" in n) n.parent.appendChild(n.clone());
+          break;
+        }
+        default:
+          throw new Error(`unknown op "${op.op}"`);
       }
-      case "cloneNode": {
-        const n = findMatch(root || frame, op.match);
-        if (n && "clone" in n) n.parent.appendChild(n.clone());
-        break;
-      }
-      default:
-        throw new Error(`unknown op "${op.op}"`);
+    } catch (err) {
+      throw new Error(`op #${i + 1} "${op.op}" failed: ${errorMessage(err)}`);
     }
   }
 

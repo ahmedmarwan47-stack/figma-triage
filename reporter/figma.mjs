@@ -130,13 +130,28 @@ function normalizeAnnotation(a) {
   };
 }
 
-/** Node metadata (name, type, children, styles) for the commented node. */
+/**
+ * Node metadata for the commented node, PLUS the styles referenced within
+ * that subtree. The nodes endpoint returns a per-node `styles` map — the only
+ * REST source that reliably surfaces unpublished local styles (the file-level
+ * styles map is truncated by ?depth, and /styles lists published only).
+ * Returns { document, styles: { paint: [names], text: [names] } }.
+ */
 export async function getNode(token, fileKey, nodeId) {
   const data = await figmaGet(
     token,
     `/v1/files/${fileKey}/nodes?ids=${encodeURIComponent(nodeId)}`,
   );
-  return data.nodes?.[nodeId]?.document ?? null;
+  const entry = data.nodes?.[nodeId];
+  const buckets = { FILL: new Set(), TEXT: new Set() };
+  for (const s of Object.values(entry?.styles ?? {})) {
+    if (s.remote) continue; // library style — not resolvable as local in the plugin
+    if (buckets[s.styleType] && s.name) buckets[s.styleType].add(s.name);
+  }
+  return {
+    document: entry?.document ?? null,
+    styles: { paint: [...buckets.FILL].sort(), text: [...buckets.TEXT].sort() },
+  };
 }
 
 /**

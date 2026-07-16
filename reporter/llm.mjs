@@ -292,9 +292,31 @@ function sanitizeAgainstStyles(verdict, localStyles) {
   return verdict;
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// The claude CLI occasionally exits 1 with empty stderr in CI (transient —
+// three comments in one run degraded to clarification for no real reason).
+// Retry with backoff before falling back.
+async function callClaudeWithRetry(userPrompt, attempts = 3) {
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await callClaude(userPrompt);
+    } catch (err) {
+      lastErr = err;
+      if (i < attempts - 1) {
+        const delay = 3000 * (i + 1);
+        console.warn(`[llm] attempt ${i + 1} failed (${err.message.slice(0, 120)}), retrying in ${delay / 1000}s`);
+        await sleep(delay);
+      }
+    }
+  }
+  throw lastErr;
+}
+
 export async function classifyAndDraft(input) {
   try {
-    const text = await callClaude(buildUserPrompt(input));
+    const text = await callClaudeWithRetry(buildUserPrompt(input));
     const verdict = parseVerdict(text);
     return sanitizeAgainstStyles(verdict, input.localStyles);
   } catch (err) {

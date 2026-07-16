@@ -338,9 +338,18 @@ async function main() {
       const nodeId = thread.head.client_meta?.node_id ?? null;
       let node = null;
       let imageUrl = null;
+      // Styles Claude may reference = file-level styles ∪ styles referenced in
+      // the commented subtree (the nodes endpoint is the only REST source that
+      // reliably lists unpublished local styles).
+      let threadStyles = localStyles;
       if (nodeId) {
         try {
-          node = await getNode(token, file.key, nodeId);
+          const nodeData = await getNode(token, file.key, nodeId);
+          node = nodeData.document;
+          threadStyles = {
+            paint: [...new Set([...(localStyles.paint ?? []), ...nodeData.styles.paint])].sort(),
+            text: [...new Set([...(localStyles.text ?? []), ...nodeData.styles.text])].sort(),
+          };
           // Whole-page pins produce huge Slack screenshots. Walk the tree
           // and find the smallest FRAME whose bounding box contains the
           // pin — that's the section the reviewer actually needs to see.
@@ -356,7 +365,7 @@ async function main() {
         comment: thread.head,
         node,
         thread: thread.replies,
-        localStyles,
+        localStyles: threadStyles,
       });
 
       const category = HEADINGS[verdict.category]

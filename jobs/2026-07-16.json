@@ -1,18 +1,18 @@
 {
   "date": "2026-07-16",
-  "generatedAt": "2026-07-16T13:03:19.780Z",
+  "generatedAt": "2026-07-16T13:38:54.142Z",
   "jobs": [
     {
       "commentId": "1846258417",
       "fileKey": "PlPSqmNnF1SEaZZn975sSz",
       "fileName": "PlPSqmNnF1SEaZZn975sSz",
       "nodeId": "15:130",
-      "imageUrl": "https://figma-alpha-api.s3.us-west-2.amazonaws.com/images/8d3083e1-6e88-4c9d-b142-e518b7efb112",
+      "imageUrl": "https://figma-alpha-api.s3.us-west-2.amazonaws.com/images/88f13949-f0cd-45d4-929b-e6d8ba5cea24",
       "category": "mechanical",
       "commentText": "change this text to \"Serviced Portfolio\" @Ahmed Marwan",
       "link": "https://www.figma.com/design/PlPSqmNnF1SEaZZn975sSz/?node-id=15%3A130",
       "job": {
-        "title": "Update heading text to \"Serviced Portfolio\"",
+        "title": "Change heading text to 'Serviced Portfolio'",
         "targetNodeId": "15:130",
         "ops": [
           {
@@ -29,21 +29,18 @@
       "fileKey": "PlPSqmNnF1SEaZZn975sSz",
       "fileName": "PlPSqmNnF1SEaZZn975sSz",
       "nodeId": "15:130",
-      "imageUrl": "https://figma-alpha-api.s3.us-west-2.amazonaws.com/images/8d3083e1-6e88-4c9d-b142-e518b7efb112",
+      "imageUrl": "https://figma-alpha-api.s3.us-west-2.amazonaws.com/images/88f13949-f0cd-45d4-929b-e6d8ba5cea24",
       "category": "mechanical",
       "commentText": "make this button solid blue color and the label of the button should pass the contrast test after that @Ahmed Marwan",
       "link": "https://www.figma.com/design/PlPSqmNnF1SEaZZn975sSz/?node-id=15%3A130",
       "job": {
-        "title": "Make hero form button solid blue with contrast-passing label",
+        "title": "Make hero form CTA button solid blue with contrast-passing label",
         "targetNodeId": "15:130",
         "ops": [
           {
-            "op": "duplicateTarget"
-          },
-          {
             "op": "setFillStyle",
             "match": "Button",
-            "styleName": "Navy/900"
+            "styleName": "Navy/700"
           },
           {
             "op": "setTextStyle",
@@ -62,8 +59,8 @@
       "file": "PlPSqmNnF1SEaZZn975sSz",
       "author": "Ahmed Marwan",
       "comment": "change this text to \"Serviced Portfolio\" @Ahmed Marwan",
-      "rationale": "Unambiguous, deterministic copy swap on the nearest text layer to the pin.",
-      "jobTitle": "Update heading text to \"Serviced Portfolio\"",
+      "rationale": "Unambiguous, deterministic text swap on a named text layer.",
+      "jobTitle": "Change heading text to 'Serviced Portfolio'",
       "options": [],
       "reply": null
     },
@@ -72,8 +69,8 @@
       "file": "PlPSqmNnF1SEaZZn975sSz",
       "author": "Ahmed Marwan",
       "comment": "make this button solid blue color and the label of the button should pass the contrast test after that @Ahmed Marwan",
-      "rationale": "Deterministic edit: swap the button container fill to a solid blue style and set the label's color style so it passes contrast.",
-      "jobTitle": "Make hero form button solid blue with contrast-passing label",
+      "rationale": "This is a deterministic style swap: solidify the button fill and adjust the label color for contrast, both expressible as declarative ops.",
+      "jobTitle": "Make hero form CTA button solid blue with contrast-passing label",
       "options": [],
       "reply": null
     },
@@ -82,12 +79,12 @@
       "file": "PlPSqmNnF1SEaZZn975sSz",
       "author": "Ahmed Marwan",
       "comment": "Why don't we try to make this light mode instead of dark mode @Ahmed Marwan",
-      "rationale": "Switching the whole landing page from dark to light mode is a broad visual-direction change requiring design judgment, not a deterministic single-value edit.",
+      "rationale": "Switching the whole landing page from dark to light mode is a broad visual-direction decision requiring judgment, not a deterministic edit.",
       "jobTitle": null,
       "options": [
-        "Full light rebuild",
-        "Light with dark hero",
-        "Warm light variant"
+        "Full Light Rebrand",
+        "Selective Light Sections",
+        "Warm Light with Amber Accents"
       ],
       "reply": null
     }

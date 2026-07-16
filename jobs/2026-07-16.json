@@ -1,18 +1,18 @@
 {
   "date": "2026-07-16",
-  "generatedAt": "2026-07-16T13:38:54.142Z",
+  "generatedAt": "2026-07-16T16:43:30.887Z",
   "jobs": [
     {
       "commentId": "1846258417",
       "fileKey": "PlPSqmNnF1SEaZZn975sSz",
-      "fileName": "PlPSqmNnF1SEaZZn975sSz",
+      "fileName": "Wellth",
       "nodeId": "15:130",
       "imageUrl": "https://figma-alpha-api.s3.us-west-2.amazonaws.com/images/88f13949-f0cd-45d4-929b-e6d8ba5cea24",
       "category": "mechanical",
       "commentText": "change this text to \"Serviced Portfolio\" @Ahmed Marwan",
       "link": "https://www.figma.com/design/PlPSqmNnF1SEaZZn975sSz/?node-id=15%3A130",
       "job": {
-        "title": "Change heading text to 'Serviced Portfolio'",
+        "title": "Update intro heading to \"Serviced Portfolio\"",
         "targetNodeId": "15:130",
         "ops": [
           {
@@ -27,16 +27,19 @@
     {
       "commentId": "1846257155",
       "fileKey": "PlPSqmNnF1SEaZZn975sSz",
-      "fileName": "PlPSqmNnF1SEaZZn975sSz",
+      "fileName": "Wellth",
       "nodeId": "15:130",
       "imageUrl": "https://figma-alpha-api.s3.us-west-2.amazonaws.com/images/88f13949-f0cd-45d4-929b-e6d8ba5cea24",
       "category": "mechanical",
       "commentText": "make this button solid blue color and the label of the button should pass the contrast test after that @Ahmed Marwan",
       "link": "https://www.figma.com/design/PlPSqmNnF1SEaZZn975sSz/?node-id=15%3A130",
       "job": {
-        "title": "Make hero form CTA button solid blue with contrast-passing label",
-        "targetNodeId": "15:130",
+        "title": "Solid blue CTA button with contrast-safe label",
+        "targetNodeId": null,
         "ops": [
+          {
+            "op": "duplicateTarget"
+          },
           {
             "op": "setFillStyle",
             "match": "Button",
@@ -56,35 +59,35 @@
   "report": [
     {
       "category": "mechanical",
-      "file": "PlPSqmNnF1SEaZZn975sSz",
+      "file": "Wellth",
       "author": "Ahmed Marwan",
       "comment": "change this text to \"Serviced Portfolio\" @Ahmed Marwan",
-      "rationale": "Unambiguous, deterministic text swap on a named text layer.",
-      "jobTitle": "Change heading text to 'Serviced Portfolio'",
+      "rationale": "A single, unambiguous copy swap on the text nearest the comment pin.",
+      "jobTitle": "Update intro heading to \"Serviced Portfolio\"",
       "options": [],
       "reply": null
     },
     {
       "category": "mechanical",
-      "file": "PlPSqmNnF1SEaZZn975sSz",
+      "file": "Wellth",
       "author": "Ahmed Marwan",
       "comment": "make this button solid blue color and the label of the button should pass the contrast test after that @Ahmed Marwan",
-      "rationale": "This is a deterministic style swap: solidify the button fill and adjust the label color for contrast, both expressible as declarative ops.",
-      "jobTitle": "Make hero form CTA button solid blue with contrast-passing label",
+      "rationale": "Solid blue fill and passing text contrast are deterministic swaps to named styles once a compliant color pair is picked.",
+      "jobTitle": "Solid blue CTA button with contrast-safe label",
       "options": [],
       "reply": null
     },
     {
       "category": "creative",
-      "file": "PlPSqmNnF1SEaZZn975sSz",
+      "file": "Wellth",
       "author": "Ahmed Marwan",
       "comment": "Why don't we try to make this light mode instead of dark mode @Ahmed Marwan",
-      "rationale": "Switching the whole landing page from dark to light mode is a broad visual-direction decision requiring judgment, not a deterministic edit.",
+      "rationale": "Switching the whole landing page from dark to light mode is a global visual-direction call requiring judgment on contrast and hierarchy, not a single deterministic edit.",
       "jobTitle": null,
       "options": [
-        "Full Light Rebrand",
-        "Selective Light Sections",
-        "Warm Light with Amber Accents"
+        "Warm Neutral Light",
+        "Navy-on-Light",
+        "Soft Amber Accent Light"
       ],
       "reply": null
     }

@@ -193,11 +193,37 @@ async function setTextStyle(root, match, textStyleName, colorStyleName, texts, p
 
 // ---- job application -------------------------------------------------------
 
+const TARGET_KEY = "claudeCommentsTargetId";
+const COMMENT_KEY = "claudeCommentsCommentId";
+const APPLIED_KEY = "claudeCommentsAppliedCommentIds"; // comma-separated
+
 async function cloneTarget(targetNodeId) {
   if (!targetNodeId) throw new Error("no target node id");
   const src = await figma.getNodeByIdAsync(targetNodeId);
   if (!src || !("clone" in src)) throw new Error(`target ${targetNodeId} not cloneable`);
   return src.clone();
+}
+
+// One container per unique target node ID on the Claude Comments page.
+// Every Apply for a comment on that same node lands inside this one clone,
+// so you don't get N duplicates of the source page when there are N comments
+// (and hitting Apply twice on the same card is a no-op).
+async function ensureContainerForTarget(targetId) {
+  const existing = figma.currentPage.findOne(
+    (n) => n.type === "FRAME" && n.getPluginData(TARGET_KEY) === String(targetId),
+  );
+  if (existing) {
+    const applied = (existing.getPluginData(APPLIED_KEY) || "").split(",").filter(Boolean);
+    return { frame: existing, root: existing.children[0] || null, created: false, applied: new Set(applied) };
+  }
+  const src = await figma.getNodeByIdAsync(targetId);
+  if (!src || !("clone" in src)) throw new Error(`target ${targetId} not cloneable`);
+  const label = src.name || `Target ${short(targetId)}`;
+  const frame = makeAutoFrame(`[Claude] ${label}`);
+  frame.setPluginData(TARGET_KEY, String(targetId));
+  const root = src.clone();
+  frame.appendChild(root);
+  return { frame, root, created: true, applied: new Set() };
 }
 
 async function applyJob(entry) {
@@ -210,24 +236,21 @@ async function applyJob(entry) {
     return applyCreative(entry, targetId, texts);
   }
 
-  // mechanical
-  const frame = makeAutoFrame(`[Comment ${short(entry.commentId)}] ${entry.job?.title || "Edit"}`);
-  const ops = entry.job?.ops || [];
-  let root = null;
-
-  // implicit duplicate if the ops don't start with one
-  if (targetId && !ops.some((o) => o.op === "duplicateTarget")) {
-    root = await cloneTarget(targetId);
-    frame.appendChild(root);
+  const { frame, root, created, applied } = await ensureContainerForTarget(targetId);
+  if (applied.has(String(entry.commentId))) {
+    figma.notify(`Already applied: ${entry.job?.title || "Edit"}`);
+    figma.currentPage.selection = [frame];
+    figma.viewport.scrollAndZoomIntoView([frame]);
+    return;
   }
 
+  const ops = entry.job?.ops || [];
   for (let i = 0; i < ops.length; i++) {
     const op = ops[i];
     try {
       switch (op.op) {
         case "duplicateTarget":
-          root = await cloneTarget(targetId);
-          frame.appendChild(root);
+          // No-op: the container already holds the single clone we share.
           break;
         case "setText":
           await setText(root || frame, op.match, op.characters);
@@ -256,13 +279,26 @@ async function applyJob(entry) {
     }
   }
 
-  placeOnCanvas(frame);
+  applied.add(String(entry.commentId));
+  frame.setPluginData(APPLIED_KEY, [...applied].join(","));
+
+  if (created) placeOnCanvas(frame);
   figma.currentPage.selection = [frame];
   figma.viewport.scrollAndZoomIntoView([frame]);
 }
 
 async function applyCreative(entry, targetId, texts) {
+  const existing = figma.currentPage.findOne(
+    (n) => n.type === "FRAME" && n.getPluginData(COMMENT_KEY) === String(entry.commentId),
+  );
+  if (existing) {
+    figma.notify(`Already applied: ${entry.job?.title || "Directions"}`);
+    figma.currentPage.selection = [existing];
+    figma.viewport.scrollAndZoomIntoView([existing]);
+    return;
+  }
   const outer = makeAutoFrame(`[Comment ${short(entry.commentId)}] Directions`);
+  outer.setPluginData(COMMENT_KEY, String(entry.commentId));
   outer.layoutMode = "HORIZONTAL";
   outer.itemSpacing = 32;
 

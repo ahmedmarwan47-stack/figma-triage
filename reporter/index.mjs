@@ -181,6 +181,59 @@ function truncate(s, n) {
   return t.length > n ? `${t.slice(0, n - 1)}…` : t;
 }
 
+// ---- image-node picker -----------------------------------------------------
+
+// Given a node subtree and a comment, find the smallest FRAME/COMPONENT/SECTION
+// whose bounding box contains the comment pin. Whole-page pins otherwise
+// produce a full-landing-page screenshot that dominates the Slack message.
+const CONTAINER_TYPES = new Set([
+  "FRAME",
+  "COMPONENT",
+  "COMPONENT_SET",
+  "INSTANCE",
+  "SECTION",
+]);
+
+function pinAbsolute(comment, node) {
+  const nb = node?.absoluteBoundingBox;
+  const off = comment?.client_meta?.node_offset;
+  if (!nb || !off) return null;
+  return { x: nb.x + off.x, y: nb.y + off.y };
+}
+
+function boxContains(box, pt) {
+  if (!box || !pt) return false;
+  return (
+    pt.x >= box.x &&
+    pt.x <= box.x + box.width &&
+    pt.y >= box.y &&
+    pt.y <= box.y + box.height
+  );
+}
+
+function boxArea(box) {
+  return box ? box.width * box.height : Number.POSITIVE_INFINITY;
+}
+
+function pickImageNode(node, comment) {
+  const pin = pinAbsolute(comment, node);
+  if (!pin) return null;
+  let best = null;
+  const stack = [node];
+  while (stack.length) {
+    const n = stack.pop();
+    if (
+      CONTAINER_TYPES.has(n.type) &&
+      boxContains(n.absoluteBoundingBox, pin) &&
+      (!best || boxArea(n.absoluteBoundingBox) < boxArea(best.absoluteBoundingBox))
+    ) {
+      best = n;
+    }
+    if (Array.isArray(n.children)) for (const c of n.children) stack.push(c);
+  }
+  return best?.id ?? null;
+}
+
 // ---- main ------------------------------------------------------------------
 
 async function main() {
@@ -285,7 +338,11 @@ async function main() {
       if (nodeId) {
         try {
           node = await getNode(token, file.key, nodeId);
-          imageUrl = await getNodeImage(token, file.key, nodeId);
+          // Whole-page pins produce huge Slack screenshots. Walk the tree
+          // and find the smallest FRAME whose bounding box contains the
+          // pin — that's the section the reviewer actually needs to see.
+          const imageNodeId = pickImageNode(node, thread.head) || nodeId;
+          imageUrl = await getNodeImage(token, file.key, imageNodeId);
         } catch (err) {
           console.warn(`[warn] node ${nodeId} in ${file.key}: ${err.message}`);
         }

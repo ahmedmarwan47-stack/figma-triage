@@ -127,9 +127,9 @@ async function makeCaption(chars, textStyles, preferred = "Caption/m") {
 // ---- op matching -----------------------------------------------------------
 
 function normalizeWs(s) {
-  // Collapse Figma's soft returns ( ), hard returns, and multi-space runs
+  // Collapse Figma's soft returns (), hard returns, and multi-space runs
   // so `characters.includes(snippet)` doesn't miss because of wrapping.
-  return String(s ?? "").replace(/[ \s]+/g, " ").trim();
+  return String(s ?? "").replace(/[\s]+/g, " ").trim();
 }
 
 function findMatch(root, match) {
@@ -144,7 +144,7 @@ function findMatch(root, match) {
     hit = root.findAll((n) => n.name && n.name.toLowerCase() === lc)[0];
     if (hit) return hit;
   }
-  // 3. text-content match, whitespace-normalized so \n /   don't hide it
+  // 3. text-content match, whitespace-normalized so \n /  don't hide it
   const targetNorm = normalizeWs(target).toLowerCase();
   if (root.findAll && targetNorm) {
     hit = root.findAll(

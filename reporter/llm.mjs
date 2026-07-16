@@ -47,23 +47,40 @@ OUTPUT — respond with ONLY a single JSON object, no prose, no markdown fences:
 Only the field matching the category is populated; the others are null. For "mechanical" set "job". For "creative" set "options". For "clarification" set "reply". For "not_for_ahmed" leave all three null.`;
 
 // Walk the node subtree and collect every TEXT descendant so Claude can target
-// real layer names for setText / setTextStyle instead of guessing. Without this
-// the plugin's `match` lookup silently fails ("no text node for 'Title'").
-function collectTextLayers(node, out = [], cap = 25) {
-  if (!node || out.length >= cap) return out;
+// real layer names for setText / setTextStyle instead of guessing. When we know
+// where the comment pin lives (client_meta.node_offset + the parent node's
+// absoluteBoundingBox), sort nearest-first — Figma frames often contain many
+// titles/labels, and without spatial context Claude picks the wrong one.
+function nodeCenter(node) {
+  const b = node?.absoluteBoundingBox;
+  if (!b) return null;
+  return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+}
+
+function collectTextLayers(node, out = []) {
+  if (!node) return out;
   if (node.type === "TEXT") {
     out.push({
       name: node.name,
       characters: (node.characters ?? "").replace(/\s+/g, " ").trim().slice(0, 80),
+      center: nodeCenter(node),
     });
   }
   if (Array.isArray(node.children)) {
-    for (const c of node.children) {
-      if (out.length >= cap) break;
-      collectTextLayers(c, out, cap);
-    }
+    for (const c of node.children) collectTextLayers(c, out);
   }
   return out;
+}
+
+function pinAbsolutePosition(comment, node) {
+  const nb = node?.absoluteBoundingBox;
+  const off = comment.client_meta?.node_offset;
+  if (!nb || !off) return null;
+  return { x: nb.x + off.x, y: nb.y + off.y };
+}
+
+function distanceRounded(a, b) {
+  return Math.round(Math.hypot(a.x - b.x, a.y - b.y));
 }
 
 function buildUserPrompt({ fileName, comment, node, thread }) {
@@ -78,16 +95,40 @@ function buildUserPrompt({ fileName, comment, node, thread }) {
         .join(", ")}`
     : "no node attached (general/canvas comment)";
 
-  const textLayers = node ? collectTextLayers(node) : [];
-  const textInventory = textLayers.length
-    ? textLayers.map((t) => `  - "${t.name}" — current text: "${t.characters}"`).join("\n")
+  const pin = node ? pinAbsolutePosition(comment, node) : null;
+  const layers = node ? collectTextLayers(node) : [];
+
+  let ranked = layers;
+  if (pin) {
+    ranked = layers
+      .map((l) => ({ ...l, dist: l.center ? distanceRounded(pin, l.center) : Number.POSITIVE_INFINITY }))
+      .sort((a, b) => a.dist - b.dist);
+  }
+  ranked = ranked.slice(0, 25);
+
+  const textInventory = ranked.length
+    ? ranked
+        .map((t) => {
+          const distStr = pin && Number.isFinite(t.dist) ? ` (${t.dist}px from pin)` : "";
+          return `  - "${t.name}" — current text: "${t.characters}"${distStr}`;
+        })
+        .join("\n")
     : "  (no text layers found in this node)";
+
+  const inventoryHeader = pin
+    ? `TEXT LAYERS INSIDE THIS NODE (SORTED BY DISTANCE TO THE COMMENT PIN — the FIRST entry is the one the pin is anchored to; prefer it for setText/setTextStyle "match" UNLESS the comment explicitly names a different layer or text). Use the layer's EXACT name from this list — never invent names like "Title" or "Heading":`
+    : `TEXT LAYERS INSIDE THIS NODE (for setText/setTextStyle "match", use these EXACT layer names — do not invent generic names like "Title" or "Heading"):`;
+
+  const pinLine = pin
+    ? `COMMENT PIN POSITION (canvas coords): x=${Math.round(pin.x)}, y=${Math.round(pin.y)}`
+    : "COMMENT PIN POSITION: unknown";
 
   return `FILE: ${fileName}
 COMMENT (${comment.user?.handle ?? "someone"}): ${comment.message}
 ATTACHED NODE: ${nodeSummary}
 TARGET NODE ID: ${comment.client_meta?.node_id ?? "none"}
-TEXT LAYERS INSIDE THIS NODE (for setText/setTextStyle "match", use these EXACT layer names — do not invent generic names like "Title" or "Heading"):
+${pinLine}
+${inventoryHeader}
 ${textInventory}
 THREAD REPLIES:
 ${replies || "  (none)"}

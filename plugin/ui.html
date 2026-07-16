@@ -2,8 +2,8 @@
   :root { color-scheme: light dark; }
   body { font: 12px/1.45 Inter, -apple-system, sans-serif; margin: 0; padding: 12px; }
   h2 { font-size: 12px; margin: 0 0 8px; text-transform: uppercase; letter-spacing: .04em; opacity: .6; }
-  .row { display: flex; gap: 6px; margin-bottom: 10px; }
-  input { flex: 1; padding: 6px 8px; border: 1px solid rgba(128,128,128,.4); border-radius: 6px; font: inherit; }
+  .row { display: flex; gap: 6px; margin-bottom: 10px; align-items: center; }
+  input[type=text], input:not([type]) { flex: 1; padding: 6px 8px; border: 1px solid rgba(128,128,128,.4); border-radius: 6px; font: inherit; }
   button { padding: 6px 10px; border: 0; border-radius: 6px; background: #0d99ff; color: #fff; font: inherit; cursor: pointer; }
   button.secondary { background: rgba(128,128,128,.18); color: inherit; }
   button:disabled { opacity: .5; cursor: default; }
@@ -17,6 +17,10 @@
   .muted { opacity: .6; }
   .empty { opacity: .6; padding: 24px 8px; text-align: center; }
   .cardfoot { display: flex; justify-content: flex-end; margin-top: 6px; }
+  .autobar { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid rgba(128,128,128,.28); border-radius: 6px; margin-bottom: 10px; background: rgba(13,153,255,.06); }
+  .autobar label { flex: 1; cursor: pointer; }
+  .autobar .dot { width: 8px; height: 8px; border-radius: 50%; background: rgba(128,128,128,.5); }
+  .autobar.on .dot { background: #1a7f37; box-shadow: 0 0 0 3px rgba(26,127,55,.15); }
   @media (prefers-color-scheme: dark) {
     .tag.mechanical { background: #123a20; color: #4ac26b; }
     .tag.creative { background: #3a2a12; color: #e0a34a; }
@@ -27,6 +31,13 @@
   <input id="base" placeholder="jobs base URL, e.g. https://raw.githubusercontent.com/owner/repo/main/jobs" />
   <button id="load">Load</button>
 </div>
+
+<div class="autobar" id="autobar">
+  <span class="dot"></span>
+  <label><input type="checkbox" id="autoApply" /> Auto-apply new drafts</label>
+  <span class="muted" id="autoStatus"></span>
+</div>
+
 <div class="row">
   <button id="applyAll" class="secondary" disabled>Apply all</button>
   <span id="status" class="muted" style="align-self:center"></span>
@@ -38,6 +49,14 @@
 <script>
   let fileKey = null;
   let jobs = [];
+  let autoApply = false;
+  let pollTimer = null;
+  const POLL_MS = 60_000; // one minute — jobs only change when the daily workflow runs
+  // In-memory set of commentIds we've dispatched to code.js this session, so the
+  // poll loop doesn't re-fire Apply on the same job over and over between polls.
+  // Cross-session idempotency is handled in code.js by the APPLIED_KEY plugin data
+  // on the container frame — this set just keeps the UI from thrashing.
+  const sentThisSession = new Set();
 
   const $ = (id) => document.getElementById(id);
   const post = (msg) => parent.postMessage({ pluginMessage: msg }, "*");
@@ -45,27 +64,72 @@
   $("load").onclick = () => loadJobs();
   $("base").onchange = () => post({ type: "saveBase", jobsBaseUrl: $("base").value.trim() });
   $("applyAll").onclick = () => {
-    for (const j of jobs) post({ type: "apply", job: j });
+    for (const j of jobs) fireApply(j);
     setStatus(`Applying ${jobs.length}…`);
   };
+  $("autoApply").onchange = (e) => {
+    autoApply = e.target.checked;
+    $("autobar").classList.toggle("on", autoApply);
+    post({ type: "setAutoApply", autoApply });
+    updateAutoStatus();
+    if (autoApply) {
+      // Fire an immediate check + apply, then start the interval.
+      loadJobs({ autoApply: true });
+      startPolling();
+    } else {
+      stopPolling();
+    }
+  };
+
+  function fireApply(job) {
+    if (!job || sentThisSession.has(job.commentId)) return;
+    sentThisSession.add(job.commentId);
+    post({ type: "apply", job });
+  }
 
   function setStatus(t) { $("status").textContent = t || ""; }
 
-  async function loadJobs() {
+  function updateAutoStatus() {
+    const el = $("autoStatus");
+    if (!autoApply) return (el.textContent = "off");
+    el.textContent = `on — checking every ${Math.round(POLL_MS / 1000)}s`;
+  }
+
+  function startPolling() {
+    stopPolling();
+    pollTimer = setInterval(() => loadJobs({ autoApply: true, silent: true }), POLL_MS);
+  }
+  function stopPolling() {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  }
+
+  async function loadJobs({ autoApply: doAuto = false, silent = false } = {}) {
     const base = $("base").value.trim().replace(/\/$/, "");
-    if (!base) return setStatus("Set a jobs base URL first.");
+    if (!base) return silent || setStatus("Set a jobs base URL first.");
     post({ type: "saveBase", jobsBaseUrl: base });
-    setStatus("Loading…");
+    if (!silent) setStatus("Loading…");
     try {
-      const res = await fetch(`${base}/latest.json`, { cache: "no-store" });
+      // Cache-bust the raw.githubusercontent CDN edge cache so a fresh workflow
+      // commit is reflected within a poll cycle instead of a 5-min TTL.
+      const res = await fetch(`${base}/latest.json?t=${Date.now()}`, { cache: "no-store" });
       if (!res.ok) throw new Error(res.status + " " + res.statusText);
       const data = await res.json();
       const all = data.jobs || [];
       jobs = all.filter((j) => !fileKey || j.fileKey === fileKey);
       render(all.length);
-      setStatus(`${jobs.length} for this file (${data.date}).`);
+      if (!silent) setStatus(`${jobs.length} for this file (${data.date}).`);
+      if (doAuto && jobs.length) {
+        // Push every job we haven't dispatched this session. code.js's
+        // per-comment applied guard will skip anything already applied
+        // in a previous session, so this is safe to spam.
+        let sent = 0;
+        for (const j of jobs) {
+          if (!sentThisSession.has(j.commentId)) { fireApply(j); sent++; }
+        }
+        if (sent) setStatus(`Auto-applying ${sent} new draft(s)…`);
+      }
     } catch (e) {
-      setStatus("Load failed: " + e.message);
+      if (!silent) setStatus("Load failed: " + e.message);
     }
   }
 
@@ -91,7 +155,7 @@
         <p class="comment">"${escapeHtml(j.commentText || "")}"</p>
         <div class="cardfoot"><button data-i="${i}">Apply</button></div>`;
       card.querySelector("button").onclick = () => {
-        post({ type: "apply", job: j });
+        fireApply(j);
         setStatus("Applying: " + title);
       };
       list.appendChild(card);
@@ -108,7 +172,16 @@
     if (msg.type === "init") {
       fileKey = msg.fileKey;
       if (msg.jobsBaseUrl) $("base").value = msg.jobsBaseUrl;
-      if (msg.jobsBaseUrl) loadJobs();
+      if (typeof msg.autoApply === "boolean") {
+        autoApply = msg.autoApply;
+        $("autoApply").checked = autoApply;
+        $("autobar").classList.toggle("on", autoApply);
+      }
+      updateAutoStatus();
+      if (msg.jobsBaseUrl) {
+        loadJobs({ autoApply });
+        if (autoApply) startPolling();
+      }
     } else if (msg.type === "applied") {
       setStatus(msg.ok ? `✓ ${msg.title}` : `✗ ${msg.title}: ${msg.error}`);
     }

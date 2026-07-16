@@ -8,17 +8,30 @@
 
 const PAGE_NAME = "Claude Comments";
 const STORE_KEY = "jobsBaseUrl";
+const AUTO_APPLY_KEY = "autoApply";
 
-figma.showUI(__html__, { width: 380, height: 560 });
+figma.showUI(__html__, { width: 380, height: 600 });
 
 (async () => {
-  const jobsBaseUrl = await figma.clientStorage.getAsync(STORE_KEY);
-  figma.ui.postMessage({ type: "init", fileKey: figma.fileKey, jobsBaseUrl });
+  const [jobsBaseUrl, autoApply] = await Promise.all([
+    figma.clientStorage.getAsync(STORE_KEY),
+    figma.clientStorage.getAsync(AUTO_APPLY_KEY),
+  ]);
+  figma.ui.postMessage({
+    type: "init",
+    fileKey: figma.fileKey,
+    jobsBaseUrl,
+    autoApply: !!autoApply,
+  });
 })();
 
 figma.ui.onmessage = async (msg) => {
   if (msg.type === "saveBase") {
     await figma.clientStorage.setAsync(STORE_KEY, msg.jobsBaseUrl);
+    return;
+  }
+  if (msg.type === "setAutoApply") {
+    await figma.clientStorage.setAsync(AUTO_APPLY_KEY, !!msg.autoApply);
     return;
   }
   if (msg.type === "apply") {

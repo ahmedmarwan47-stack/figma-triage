@@ -1,18 +1,18 @@
 {
   "date": "2026-07-16",
-  "generatedAt": "2026-07-16T11:40:09.017Z",
+  "generatedAt": "2026-07-16T11:48:01.940Z",
   "jobs": [
     {
       "commentId": "1846165803",
       "fileKey": "PlPSqmNnF1SEaZZn975sSz",
       "fileName": "PlPSqmNnF1SEaZZn975sSz",
       "nodeId": "15:130",
-      "imageUrl": "https://figma-alpha-api.s3.us-west-2.amazonaws.com/images/89b268a2-bd8f-481f-9590-82090d81a5f9",
+      "imageUrl": "https://figma-alpha-api.s3.us-west-2.amazonaws.com/images/2ac4736a-10e3-4a58-af0f-1d515c0b3b31",
       "category": "mechanical",
       "commentText": "change the title to \"claude test\" @Ahmed Marwan",
       "link": "https://www.figma.com/design/PlPSqmNnF1SEaZZn975sSz/?node-id=15%3A130",
       "job": {
-        "title": "Update title text to \"claude test\"",
+        "title": "Change hero title to \"claude test\"",
         "targetNodeId": "15:130",
         "ops": [
           {
@@ -20,7 +20,7 @@
           },
           {
             "op": "setText",
-            "match": "Title",
+            "match": "Where Wellness Meets Luxury",
             "characters": "claude test"
           }
         ]
@@ -34,8 +34,8 @@
       "file": "PlPSqmNnF1SEaZZn975sSz",
       "author": "Ahmed Marwan",
       "comment": "change the title to \"claude test\" @Ahmed Marwan",
-      "rationale": "Simple deterministic text swap on a specific node with no ambiguity in the requested edit.",
-      "jobTitle": "Update title text to \"claude test\"",
+      "rationale": "Unambiguous deterministic text swap on the hero title node.",
+      "jobTitle": "Change hero title to \"claude test\"",
       "options": [],
       "reply": null
     }

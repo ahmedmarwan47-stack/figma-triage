@@ -64,7 +64,12 @@ FIGMA_TOKEN=… node reporter/reply-figma.mjs <fileKey> <commentId> "your review
 ```
 
 ## Extending what the plugin can apply
-The op vocabulary is defined in **two places that must stay in sync**: the prompt in `reporter/llm.mjs` (what Claude may emit) and the interpreter in `plugin/code.js` (what actually runs). Current ops: `duplicateTarget`, `setText`, `setFillStyle`, `setTextStyle`, `removeNode`, `cloneNode`. Add a new op to both.
+The op vocabulary is defined in **two places that must stay in sync**: the prompt in `reporter/llm.mjs` (what Claude may emit) and the interpreter in `plugin/code.js` (what actually runs). Current ops: `duplicateTarget`, `setText`, `setFillStyle`, `setFillColor` (hex fallback), `setTextStyle`, `removeNode`, `cloneNode`. Add a new op to both.
+
+Creative comments are compiled into the same vocabulary: each drafted direction option carries its own op list, applied per-option from the plugin (one clone per direction, side by side). Directions that ops can't express ship an `aiPrompt` for Figma's native AI instead.
+
+## Two-way Slack (optional)
+Deploy `worker/` (Cloudflare Worker — see `worker/README.md`) and set `SLACK_BOT_TOKEN` + `SLACK_CHANNEL_ID` secrets to unlock the clarification loop: reply to a "❓ Needs your input" message in its Slack thread, and the comment is automatically re-triaged with your answer as context — usually promoting it to an apply-ready mechanical draft. Your reply is context for Claude only; it is never posted to the Figma thread.
 
 ## DST note
 GitHub cron is UTC-only, so the workflow fires at both 11:00 and 12:00 UTC (bracketing Cairo's summer/winter offset) and the reporter's local-hour guard runs the work exactly once, at 14:00 Cairo.

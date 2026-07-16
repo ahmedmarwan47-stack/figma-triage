@@ -37,24 +37,17 @@ jobs:
       - name: Install Claude Code
         run: npm install -g @anthropic-ai/claude-code
 
-      - name: Debug claude (temporary)
-        env:
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-        run: |
-          claude --version || echo "no version"
-          echo "token set: ${CLAUDE_CODE_OAUTH_TOKEN:+yes}"
-          set +e
-          claude -p "Reply with the single word OK" --output-format json < /dev/null > out.txt 2> err.txt
-          echo "EXIT=$?"
-          echo "--- STDOUT ---"; cat out.txt
-          echo "--- STDERR ---"; cat err.txt
-
       - name: Run triage
         env:
           FIGMA_TOKEN: ${{ secrets.FIGMA_TOKEN }}
           # Draws on the Claude subscription — generated with `claude setup-token`.
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          # Bot transport (two-way clarification loop; see worker/README.md).
+          # When set, digests post via the bot and clarifications become
+          # threadable messages the worker can route back.
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
           FORCE_RUN: ${{ inputs.force && '1' || '' }}
         run: npm run triage
 
@@ -62,10 +55,12 @@ jobs:
         run: |
           git config user.name "figma-triage-bot"
           git config user.email "bot@users.noreply.github.com"
-          git add reporter/state.json jobs/
+          git add reporter/state.json jobs/ clarifications/
           if git diff --staged --quiet; then
             echo "No changes to commit."
           else
             git commit -m "triage: $(date -u +%Y-%m-%d) run"
+            # A clarification commit from the worker may have landed mid-run.
+            git pull --rebase
             git push
           fi

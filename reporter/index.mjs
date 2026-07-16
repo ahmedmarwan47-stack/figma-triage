@@ -6,7 +6,7 @@
 // auto-posts comment replies — it only reports and publishes apply-ready jobs
 // for the companion plugin.
 
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, readdir, unlink } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -20,15 +20,42 @@ import {
   getNodeImage,
 } from "./figma.mjs";
 import { classifyAndDraft } from "./llm.mjs";
-import { postSlack } from "./slack.mjs";
+import { postSlack, postSlackBot } from "./slack.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
 const CONFIG_PATH = join(ROOT, "config.json");
 const STATE_PATH = join(HERE, "state.json");
 const JOBS_DIR = join(ROOT, "jobs");
+const CLAR_DIR = join(ROOT, "clarifications");
 
 const FORCE = !!process.env.FORCE_RUN;
+
+// ---- Slack clarification loop (written by worker/, consumed here) -----------
+
+// Each file is clarifications/<commentId>.json: { commentId, fileKey, text,
+// author, ts } — Ahmed's Slack thread reply to a "needs clarification" item.
+// Presence of a file forces the comment to be re-triaged with the reply as
+// extra context, then the file is deleted (the workflow commits the removal).
+async function readClarifications() {
+  const map = new Map();
+  let files = [];
+  try {
+    files = await readdir(CLAR_DIR);
+  } catch {
+    return map;
+  }
+  for (const f of files) {
+    if (!f.endsWith(".json")) continue;
+    try {
+      const data = JSON.parse(await readFile(join(CLAR_DIR, f), "utf8"));
+      if (data.commentId && data.text) map.set(String(data.commentId), data);
+    } catch (err) {
+      console.warn(`[clarify] bad file ${f}: ${err.message}`);
+    }
+  }
+  return map;
+}
 
 // ---- time helpers (timezone-aware, DST-safe) -------------------------------
 
@@ -179,6 +206,25 @@ function formatDigest({ date, buckets, filesScanned }) {
   return lines.join("\n");
 }
 
+// One standalone Slack message per needs-clarification comment. The trailing
+// ref line is what worker/ parses to route your thread reply back to the
+// right Figma comment — keep its format in sync with worker/index.js.
+function formatClarificationMessage(it) {
+  const lines = [
+    `❓ *Needs your input* — <${it.link}|${it.fileName}>`,
+    `> ${it.commentAuthor}: "${truncate(it.commentText, 200)}"`,
+    `_${it.rationale}_`,
+  ];
+  if (it.imageUrl) lines.push(`📸 ${it.imageUrl}`);
+  if (it.verdict.reply) lines.push(`💬 _Suggested thread reply:_ ${truncate(it.verdict.reply, 260)}`);
+  lines.push(
+    "",
+    "*Reply in this thread* to clarify — I'll re-triage the comment with your answer and draft the edit automatically. (Your reply stays here; nothing is posted to Figma.)",
+    `\`ref:cmt_${it.commentId} file:${it.fileKey}\``,
+  );
+  return lines.join("\n");
+}
+
 function truncate(s, n) {
   const t = (s ?? "").replace(/\s+/g, " ").trim();
   return t.length > n ? `${t.slice(0, n - 1)}…` : t;
@@ -294,6 +340,13 @@ async function main() {
   };
   const jobs = [];
 
+  // Slack thread replies routed back by the worker — force those comments
+  // through re-triage with the reply as context, even if "old".
+  const clarifications = await readClarifications();
+  if (clarifications.size) {
+    console.log(`[clarify] ${clarifications.size} clarification(s) to consume`);
+  }
+
   for (const file of files) {
     let comments;
     try {
@@ -332,7 +385,9 @@ async function main() {
           config.figma.includeAllUnresolved ||
           mentionsUser(t, handles),
       )
-      .filter((t) => latestActivity(t) > sinceTs);
+      .filter(
+        (t) => latestActivity(t) > sinceTs || clarifications.has(String(t.head.id)),
+      );
 
     for (const thread of threads) {
       const nodeId = thread.head.client_meta?.node_id ?? null;
@@ -360,19 +415,42 @@ async function main() {
         }
       }
 
+      // Ahmed's Slack-thread clarification (if any) becomes thread context so
+      // Claude re-triages with the ambiguity resolved — usually promoting the
+      // comment to mechanical.
+      const clar = clarifications.get(String(thread.head.id));
+      const replies = clar
+        ? [
+            ...thread.replies,
+            {
+              user: { handle: "Ahmed (clarified via Slack)" },
+              message: clar.text,
+              created_at: clar.ts || now.toISOString(),
+            },
+          ]
+        : thread.replies;
+
       const verdict = await classifyAndDraft({
         fileName: file.name,
         comment: thread.head,
         node,
-        thread: thread.replies,
+        thread: replies,
         localStyles: threadStyles,
       });
+
+      // Clarification consumed — remove the file (the workflow commits the
+      // deletion) so the next run doesn't re-process it.
+      if (clar) {
+        await unlink(join(CLAR_DIR, `${thread.head.id}.json`)).catch(() => {});
+        clarifications.delete(String(thread.head.id));
+      }
 
       const category = HEADINGS[verdict.category]
         ? verdict.category
         : "clarification";
 
       buckets[category].push({
+        commentId: thread.head.id,
         fileName: file.name,
         fileKey: file.key,
         link: fileLink(file.key, nodeId),
@@ -409,13 +487,23 @@ async function main() {
     buckets.creative.length +
     buckets.clarification.length;
 
-  if (totalActionable === 0 && buckets.not_for_ahmed.length === 0) {
-    await postSlack(process.env.SLACK_WEBHOOK_URL, `*Figma triage — ${today}*\nNo new mentions today.`);
+  const digestText =
+    totalActionable === 0 && buckets.not_for_ahmed.length === 0
+      ? `*Figma triage — ${today}*\nNo new mentions today.`
+      : formatDigest({ date: today, buckets, filesScanned: files.length });
+
+  const botToken = process.env.SLACK_BOT_TOKEN;
+  const channelId = process.env.SLACK_CHANNEL_ID;
+  if (botToken && channelId) {
+    // Bot transport: digest first, then each clarification as its OWN message
+    // carrying a ref marker. A thread reply on that message is routed back to
+    // the matching Figma comment by worker/ and consumed on the next run.
+    await postSlackBot(botToken, channelId, digestText);
+    for (const it of buckets.clarification) {
+      await postSlackBot(botToken, channelId, formatClarificationMessage(it));
+    }
   } else {
-    await postSlack(
-      process.env.SLACK_WEBHOOK_URL,
-      formatDigest({ date: today, buckets, filesScanned: files.length }),
-    );
+    await postSlack(process.env.SLACK_WEBHOOK_URL, digestText);
   }
 
   // Full triage record (all categories, including the drafts that don't become

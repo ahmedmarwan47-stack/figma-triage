@@ -1,0 +1,12 @@
+name = "figma-triage-worker"
+main = "index.js"
+compatibility_date = "2026-01-01"
+
+[vars]
+GITHUB_REPO = "ahmedmarwan47-stack/figma-triage"
+GITHUB_BRANCH = "main"
+
+# Secrets (set via `wrangler secret put <NAME>`, never in this file):
+#   SLACK_SIGNING_SECRET
+#   SLACK_BOT_TOKEN
+#   GITHUB_TOKEN

@@ -1,0 +1,2 @@
+# The worker writes clarifications/<commentId>.json here when Ahmed replies to
+# a "Needs your input" Slack thread. The reporter consumes and deletes them.

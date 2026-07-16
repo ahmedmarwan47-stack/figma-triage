@@ -9,13 +9,23 @@ function authHeaders(token) {
   return { "X-Figma-Token": token };
 }
 
-async function figmaGet(token, path) {
-  const res = await fetch(`${BASE}${path}`, { headers: authHeaders(token) });
-  if (!res.ok) {
+async function figmaGet(token, path, { retries = 3 } = {}) {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(`${BASE}${path}`, { headers: authHeaders(token) });
+    if (res.ok) return res.json();
     const body = await res.text().catch(() => "");
+    // Rate limits are routine when a run renders several node images —
+    // honor Retry-After instead of dropping the screenshot.
+    if (res.status === 429 && attempt < retries) {
+      const waitS = Number(res.headers.get("retry-after")) || 10 * (attempt + 1);
+      console.warn(
+        `[figma] 429 on ${path} — waiting ${waitS}s (attempt ${attempt + 1}/${retries})`,
+      );
+      await new Promise((r) => setTimeout(r, waitS * 1000));
+      continue;
+    }
     throw new Error(`Figma GET ${path} → ${res.status} ${res.statusText} ${body}`);
   }
-  return res.json();
 }
 
 /** The authenticated user — used to figure out which comments mention Ahmed. */

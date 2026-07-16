@@ -66,6 +66,53 @@ export async function getFileComments(token, fileKey) {
   return data.comments ?? [];
 }
 
+/**
+ * Fetch dev-mode annotations for a file. Figma's annotations API has been
+ * gated over time — this call tries the current public endpoint and returns
+ * an empty array on 404/403 so the pipeline doesn't crash on files/plans that
+ * don't expose it. Successful responses are normalized to the same shape the
+ * caller uses for comments (id, message, client_meta, user, created_at).
+ */
+export async function getFileAnnotations(token, fileKey) {
+  try {
+    const data = await figmaGet(token, `/v1/files/${fileKey}/annotations`);
+    const annotations = data.annotations ?? data.meta?.annotations ?? [];
+    console.log(
+      `[figma] annotations for ${fileKey}: ${annotations.length} (endpoint alive)`,
+    );
+    return annotations.map((a) => normalizeAnnotation(a));
+  } catch (err) {
+    if (/\b(403|404)\b/.test(err.message)) {
+      console.log(
+        `[figma] annotations endpoint not available for ${fileKey} (${err.message.match(/\b(403|404)\b/)[0]}). Skipping.`,
+      );
+      return [];
+    }
+    console.warn(`[figma] annotations fetch failed for ${fileKey}: ${err.message}`);
+    return [];
+  }
+}
+
+function normalizeAnnotation(a) {
+  // Shape defensively — fields vary across API versions. Keep the raw payload
+  // available under `_raw` so we can iterate on parsing without another round-trip.
+  const label = a.label ?? a.name ?? "";
+  const properties = Array.isArray(a.properties)
+    ? a.properties.map((p) => `${p.label ?? p.name ?? ""}: ${p.value ?? ""}`).join("; ")
+    : "";
+  return {
+    id: `annotation:${a.id ?? a.node_id ?? ""}`,
+    message: [label, properties].filter(Boolean).join(" — "),
+    resolved_at: null,
+    parent_id: null,
+    created_at: a.created_at ?? new Date().toISOString(),
+    user: { handle: a.author?.handle ?? "annotation" },
+    client_meta: { node_id: a.node_id ?? null, node_offset: null },
+    _raw: a,
+    _isAnnotation: true,
+  };
+}
+
 /** Node metadata (name, type, children, styles) for the commented node. */
 export async function getNode(token, fileKey, nodeId) {
   const data = await figmaGet(

@@ -31,6 +31,13 @@ MECHANICAL JOB — op vocabulary (the ONLY ops the plugin can run; emit nothing 
 - { "op": "duplicateTarget" }                                  // clone the commented node into the review frame (usually the first op)
 - { "op": "setText", "match": "<node name or its current text>", "characters": "<new copy>" }
 - { "op": "setFillStyle", "match": "<node name>", "styleName": "Tone/200" }
+  IMPORTANT: setFillStyle changes the fill of whatever node "match" resolves to.
+  To change a BUTTON or CARD background, "match" MUST be the CONTAINER frame
+  (from the "inside:" chain of the label text — e.g. "Primary CTA" or "Button"),
+  NOT the label text inside it. Never pass a text-content snippet like "ENQUIRE
+  NOW" as match for a button-fill change — that hits the label's own fill and
+  leaves the button background untouched. Use setTextStyle (colorStyleName) for
+  the label's color, and setFillStyle on the container frame for the background.
 - { "op": "setTextStyle", "match": "<node name>", "textStyleName": "Body/l" | null, "colorStyleName": "Tone/900" | null }
   Either field may be null — supply ONLY what the comment actually asks for.
   If the comment only mentions color, contrast, tone, or "make it lighter/darker",
@@ -61,17 +68,24 @@ function nodeCenter(node) {
   return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
 }
 
-function collectTextLayers(node, out = []) {
+function collectTextLayers(node, out = [], chain = []) {
   if (!node) return out;
   if (node.type === "TEXT") {
     out.push({
       name: node.name,
       characters: (node.characters ?? "").replace(/\s+/g, " ").trim().slice(0, 80),
       center: nodeCenter(node),
+      // ancestor chain root→leaf, excluding the TEXT node itself. Used to help
+      // Claude distinguish a button FRAME from the LABEL text inside it —
+      // otherwise setFillStyle match="ENQUIRE NOW" ends up on the label, not
+      // the button background.
+      chain: [...chain],
     });
   }
   if (Array.isArray(node.children)) {
-    for (const c of node.children) collectTextLayers(c, out);
+    const nextChain =
+      node.type !== "TEXT" ? [...chain, `"${node.name}"(${node.type})`] : chain;
+    for (const c of node.children) collectTextLayers(c, out, nextChain);
   }
   return out;
 }
@@ -114,7 +128,12 @@ function buildUserPrompt({ fileName, comment, node, thread }) {
     ? ranked
         .map((t) => {
           const distStr = pin && Number.isFinite(t.dist) ? ` (${t.dist}px from pin)` : "";
-          return `  - "${t.name}" — current text: "${t.characters}"${distStr}`;
+          // Include the last 3 ancestors so Claude can target a button FRAME
+          // or CARD by name instead of misdirecting setFillStyle at the
+          // label text inside it.
+          const chain = (t.chain || []).slice(-3).join(" → ");
+          const chainStr = chain ? `\n      inside: ${chain}` : "";
+          return `  - "${t.name}" — current text: "${t.characters}"${distStr}${chainStr}`;
         })
         .join("\n")
     : "  (no text layers found in this node)";

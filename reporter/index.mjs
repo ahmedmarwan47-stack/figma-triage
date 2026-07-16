@@ -14,6 +14,7 @@ import {
   getMe,
   resolveFiles,
   getFileComments,
+  getFileAnnotations,
   getNode,
   getNodeImage,
 } from "./figma.mjs";
@@ -116,8 +117,15 @@ function formatDigest({ date, buckets, filesScanned }) {
         lines.push(`   → ${it.verdict.job.title} (${it.verdict.job.ops.length} op(s))`);
       }
       if (cat === "creative" && it.verdict.options) {
+        // Bare URL on its own line — Slack unfurls S3 image URLs into an
+        // inline preview so the reviewer sees the source frame alongside the
+        // drafted directions.
+        if (it.imageUrl) lines.push(`   📸 ${it.imageUrl}`);
         for (const opt of it.verdict.options) {
           lines.push(`   ▸ *${opt.label}* — ${truncate(opt.caption, 160)}`);
+          if (opt.aiPrompt) {
+            lines.push(`      \`AI prompt:\` ${truncate(opt.aiPrompt, 220)}`);
+          }
         }
       }
       if (cat === "clarification" && it.verdict.reply) {
@@ -133,7 +141,7 @@ function formatDigest({ date, buckets, filesScanned }) {
   if (total > 0) {
     lines.push(
       "",
-      "_Open the *Claude Comments* plugin in the file to apply mechanical + creative drafts. Replies are drafts only — post them yourself after a glance._",
+      "_Open the *Claude Comments* plugin in the file to apply mechanical drafts. Creative directions stay here in Slack — pick one and paste its AI prompt into Figma's native AI agent yourself. Clarification replies are drafts only — post them yourself after a glance._",
     );
   }
   return lines.join("\n");
@@ -210,10 +218,21 @@ async function main() {
       continue;
     }
 
-    const threads = buildThreads(comments)
+    // Annotations (Dev Mode). getFileAnnotations returns [] on 403/404 or
+    // parse failure, so a plan that doesn't expose the endpoint is a silent
+    // no-op — comments still flow through as normal.
+    const annotations = await getFileAnnotations(token, file.key);
+
+    const threads = [
+      ...buildThreads(comments),
+      ...annotations.map((a) => ({ head: a, replies: [] })),
+    ]
       .filter((t) => !t.head.resolved_at)
       .filter(
-        (t) => config.figma.includeAllUnresolved || mentionsUser(t, handles),
+        (t) =>
+          t.head._isAnnotation ||
+          config.figma.includeAllUnresolved ||
+          mentionsUser(t, handles),
       )
       .filter((t) => latestActivity(t) > sinceTs);
 
@@ -247,11 +266,14 @@ async function main() {
         commentAuthor: thread.head.user?.handle ?? "someone",
         commentText: thread.head.message,
         rationale: verdict.rationale ?? "",
+        imageUrl,
         verdict,
       });
 
-      // Mechanical + creative become apply-ready jobs for the plugin.
-      if (category === "mechanical" || category === "creative") {
+      // Only mechanical jobs become plugin-applied edits. Creative directions
+      // stay in the Slack digest (with the source screenshot) — no in-Figma
+      // render, since drafted directions are judgment prompts, not edits.
+      if (category === "mechanical") {
         jobs.push({
           commentId: thread.head.id,
           fileKey: file.key,

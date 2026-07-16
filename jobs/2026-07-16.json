@@ -1,13 +1,13 @@
 {
   "date": "2026-07-16",
-  "generatedAt": "2026-07-16T11:48:01.940Z",
+  "generatedAt": "2026-07-16T12:05:55.417Z",
   "jobs": [
     {
       "commentId": "1846165803",
       "fileKey": "PlPSqmNnF1SEaZZn975sSz",
       "fileName": "PlPSqmNnF1SEaZZn975sSz",
       "nodeId": "15:130",
-      "imageUrl": "https://figma-alpha-api.s3.us-west-2.amazonaws.com/images/2ac4736a-10e3-4a58-af0f-1d515c0b3b31",
+      "imageUrl": "https://figma-alpha-api.s3.us-west-2.amazonaws.com/images/1605c4b2-2dea-4bad-be95-58e537b11ff6",
       "category": "mechanical",
       "commentText": "change the title to \"claude test\" @Ahmed Marwan",
       "link": "https://www.figma.com/design/PlPSqmNnF1SEaZZn975sSz/?node-id=15%3A130",
@@ -20,7 +20,7 @@
           },
           {
             "op": "setText",
-            "match": "Where Wellness Meets Luxury",
+            "match": "A Vision of Inspired Living",
             "characters": "claude test"
           }
         ]
@@ -34,7 +34,7 @@
       "file": "PlPSqmNnF1SEaZZn975sSz",
       "author": "Ahmed Marwan",
       "comment": "change the title to \"claude test\" @Ahmed Marwan",
-      "rationale": "Unambiguous deterministic text swap on the hero title node.",
+      "rationale": "Straightforward, unambiguous text swap on the title copy closest to the comment pin.",
       "jobTitle": "Change hero title to \"claude test\"",
       "options": [],
       "reply": null

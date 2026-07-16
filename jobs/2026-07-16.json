@@ -1,6 +1,41 @@
 {
   "date": "2026-07-16",
-  "generatedAt": "2026-07-16T16:50:16.204Z",
+  "generatedAt": "2026-07-16T17:02:49.069Z",
   "jobs": [],
-  "report": []
+  "report": [
+    {
+      "category": "creative",
+      "file": "Wellth",
+      "author": "Ahmed Marwan",
+      "comment": "I don't like how the button looks on the form find another color for it @Ahmed Marwan",
+      "rationale": "Comment says he dislikes the current button color and wants 'another color' with no target specified, which requires a design judgment call rather than a deterministic swap.",
+      "jobTitle": null,
+      "options": [
+        "Navy Solid",
+        "Amber Accent",
+        "Tone Neutral Deep"
+      ],
+      "reply": null
+    },
+    {
+      "category": "clarification",
+      "file": "Wellth",
+      "author": "Ahmed Marwan",
+      "comment": "this one too @Ahmed Marwan",
+      "rationale": "The comment only says \"this one too\" with no actual instruction attached, so there's no deterministic edit or creative direction to extract.",
+      "jobTitle": null,
+      "options": [],
+      "reply": "I wasn't sure what you meant by \"this one too\" here — could you say which element or change you're pointing at? I didn't want to guess and edit the wrong layer."
+    },
+    {
+      "category": "clarification",
+      "file": "Wellth",
+      "author": "Ahmed Marwan",
+      "comment": "make this \"private testing\"",
+      "rationale": "\"Private testing\" doesn't fit this dining/brand-intro section and reads like a likely typo for \"Private Tasting\", so I shouldn't guess at the copy change.",
+      "jobTitle": null,
+      "options": [],
+      "reply": "Quick check before I touch this — did you mean \"Private Tasting\" for the Interior Image caption? \"Private testing\" doesn't quite land next to the dining copy, so I want to confirm the wording before I swap it in."
+    }
+  ]
 }

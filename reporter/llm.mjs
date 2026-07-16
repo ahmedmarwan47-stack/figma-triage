@@ -46,6 +46,26 @@ OUTPUT — respond with ONLY a single JSON object, no prose, no markdown fences:
 }
 Only the field matching the category is populated; the others are null. For "mechanical" set "job". For "creative" set "options". For "clarification" set "reply". For "not_for_ahmed" leave all three null.`;
 
+// Walk the node subtree and collect every TEXT descendant so Claude can target
+// real layer names for setText / setTextStyle instead of guessing. Without this
+// the plugin's `match` lookup silently fails ("no text node for 'Title'").
+function collectTextLayers(node, out = [], cap = 25) {
+  if (!node || out.length >= cap) return out;
+  if (node.type === "TEXT") {
+    out.push({
+      name: node.name,
+      characters: (node.characters ?? "").replace(/\s+/g, " ").trim().slice(0, 80),
+    });
+  }
+  if (Array.isArray(node.children)) {
+    for (const c of node.children) {
+      if (out.length >= cap) break;
+      collectTextLayers(c, out, cap);
+    }
+  }
+  return out;
+}
+
 function buildUserPrompt({ fileName, comment, node, thread }) {
   const replies = (thread ?? [])
     .map((r) => `  - ${r.user?.handle ?? "someone"}: ${r.message}`)
@@ -58,10 +78,17 @@ function buildUserPrompt({ fileName, comment, node, thread }) {
         .join(", ")}`
     : "no node attached (general/canvas comment)";
 
+  const textLayers = node ? collectTextLayers(node) : [];
+  const textInventory = textLayers.length
+    ? textLayers.map((t) => `  - "${t.name}" — current text: "${t.characters}"`).join("\n")
+    : "  (no text layers found in this node)";
+
   return `FILE: ${fileName}
 COMMENT (${comment.user?.handle ?? "someone"}): ${comment.message}
 ATTACHED NODE: ${nodeSummary}
 TARGET NODE ID: ${comment.client_meta?.node_id ?? "none"}
+TEXT LAYERS INSIDE THIS NODE (for setText/setTextStyle "match", use these EXACT layer names — do not invent generic names like "Title" or "Heading"):
+${textInventory}
 THREAD REPLIES:
 ${replies || "  (none)"}
 

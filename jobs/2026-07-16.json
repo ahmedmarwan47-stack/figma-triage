@@ -1,19 +1,166 @@
 {
   "date": "2026-07-16",
-  "generatedAt": "2026-07-16T17:02:49.069Z",
-  "jobs": [],
+  "generatedAt": "2026-07-16T17:15:56.236Z",
+  "jobs": [
+    {
+      "commentId": "1846760181",
+      "fileKey": "PlPSqmNnF1SEaZZn975sSz",
+      "fileName": "Wellth",
+      "nodeId": "15:130",
+      "imageUrl": "https://figma-alpha-api.s3.us-west-2.amazonaws.com/images/2a675a93-7d1f-4899-8a34-8c1a1af1c5a6",
+      "category": "mechanical",
+      "commentText": "I don't like how the button looks on the form find another color for it @Ahmed Marwan",
+      "link": "https://www.figma.com/design/PlPSqmNnF1SEaZZn975sSz/?node-id=15%3A130",
+      "job": {
+        "title": "Swap Hero Form CTA button fill to a different local color style",
+        "targetNodeId": null,
+        "ops": [
+          {
+            "op": "duplicateTarget"
+          },
+          {
+            "op": "setFillStyle",
+            "match": "Button",
+            "styleName": "Amber/600"
+          }
+        ]
+      },
+      "options": null
+    },
+    {
+      "commentId": "1846759006",
+      "fileKey": "PlPSqmNnF1SEaZZn975sSz",
+      "fileName": "Wellth",
+      "nodeId": "15:130",
+      "imageUrl": "https://figma-alpha-api.s3.us-west-2.amazonaws.com/images/d97c234e-f121-4fab-ae44-12f5700e9060",
+      "category": "mechanical",
+      "commentText": "make this \"private testing\"",
+      "link": "https://www.figma.com/design/PlPSqmNnF1SEaZZn975sSz/?node-id=15%3A130",
+      "job": {
+        "title": "Swap 'Private Dining' copy to 'private testing'",
+        "targetNodeId": "15:130",
+        "ops": [
+          {
+            "op": "duplicateTarget"
+          },
+          {
+            "op": "setText",
+            "match": "Private Dining",
+            "characters": "private testing"
+          }
+        ]
+      },
+      "options": null
+    },
+    {
+      "commentId": "1846258417",
+      "fileKey": "PlPSqmNnF1SEaZZn975sSz",
+      "fileName": "Wellth",
+      "nodeId": "15:130",
+      "imageUrl": "https://figma-alpha-api.s3.us-west-2.amazonaws.com/images/4f71ab5e-026c-4e92-89b4-e281d8ff4e9d",
+      "category": "mechanical",
+      "commentText": "change this text to \"Serviced Portfolio\" @Ahmed Marwan",
+      "link": "https://www.figma.com/design/PlPSqmNnF1SEaZZn975sSz/?node-id=15%3A130",
+      "job": {
+        "title": "Change heading to 'Serviced Portfolio'",
+        "targetNodeId": "15:130",
+        "ops": [
+          {
+            "op": "duplicateTarget"
+          },
+          {
+            "op": "setText",
+            "match": "Discover Our Portfolio",
+            "characters": "Serviced Portfolio"
+          }
+        ]
+      },
+      "options": null
+    },
+    {
+      "commentId": "1846257155",
+      "fileKey": "PlPSqmNnF1SEaZZn975sSz",
+      "fileName": "Wellth",
+      "nodeId": "15:130",
+      "imageUrl": "https://figma-alpha-api.s3.us-west-2.amazonaws.com/images/a5203ab6-9a2c-4f05-ad24-8abe923c02b8",
+      "category": "mechanical",
+      "commentText": "make this button solid blue color and the label of the button should pass the contrast test after that @Ahmed Marwan",
+      "link": "https://www.figma.com/design/PlPSqmNnF1SEaZZn975sSz/?node-id=15%3A130",
+      "job": {
+        "title": "Set Hero Form button to solid blue with contrast-safe label color",
+        "targetNodeId": "15:130",
+        "ops": [
+          {
+            "op": "duplicateTarget"
+          },
+          {
+            "op": "setFillStyle",
+            "match": "Button",
+            "styleName": "Navy/700"
+          },
+          {
+            "op": "setTextStyle",
+            "match": "ENQUIRE NOW",
+            "textStyleName": null,
+            "colorStyleName": "Navy/50"
+          }
+        ]
+      },
+      "options": null
+    }
+  ],
   "report": [
+    {
+      "category": "mechanical",
+      "file": "Wellth",
+      "author": "Ahmed Marwan",
+      "comment": "I don't like how the button looks on the form find another color for it @Ahmed Marwan",
+      "rationale": "Clear directive to change the button's color with an unambiguous target (the Hero Form CTA button), even though the exact hue is left to Ahmed's judgment — same as other style-swap edits.",
+      "jobTitle": "Swap Hero Form CTA button fill to a different local color style",
+      "options": [],
+      "reply": null
+    },
+    {
+      "category": "mechanical",
+      "file": "Wellth",
+      "author": "Ahmed Marwan",
+      "comment": "make this \"private testing\"",
+      "rationale": "Clear directive with quoted replacement text targeting the nearest text layer to the pin.",
+      "jobTitle": "Swap 'Private Dining' copy to 'private testing'",
+      "options": [],
+      "reply": null
+    },
+    {
+      "category": "mechanical",
+      "file": "Wellth",
+      "author": "Ahmed Marwan",
+      "comment": "change this text to \"Serviced Portfolio\" @Ahmed Marwan",
+      "rationale": "Clear directive with exact quoted replacement text and a resolvable target (the pinned heading), so it can be auto-executed.",
+      "jobTitle": "Change heading to 'Serviced Portfolio'",
+      "options": [],
+      "reply": null
+    },
+    {
+      "category": "mechanical",
+      "file": "Wellth",
+      "author": "Ahmed Marwan",
+      "comment": "make this button solid blue color and the label of the button should pass the contrast test after that @Ahmed Marwan",
+      "rationale": "Clear directive: make the button solid blue and ensure the label passes contrast, targeting the nearest button (Hero Form ENQUIRE NOW).",
+      "jobTitle": "Set Hero Form button to solid blue with contrast-safe label color",
+      "options": [],
+      "reply": null
+    },
     {
       "category": "creative",
       "file": "Wellth",
       "author": "Ahmed Marwan",
-      "comment": "I don't like how the button looks on the form find another color for it @Ahmed Marwan",
-      "rationale": "Comment says he dislikes the current button color and wants 'another color' with no target specified, which requires a design judgment call rather than a deterministic swap.",
+      "comment": "Why don't we try to make this light mode instead of dark mode @Ahmed Marwan",
+      "rationale": "Flipping the landing page from dark to light mode is a visual-direction call that needs design judgment, not a single mechanical swap.",
       "jobTitle": null,
       "options": [
-        "Navy Solid",
-        "Amber Accent",
-        "Tone Neutral Deep"
+        "Full light inversion",
+        "Warm light mode",
+        "Hybrid hero-to-light"
       ],
       "reply": null
     },
@@ -22,20 +169,10 @@
       "file": "Wellth",
       "author": "Ahmed Marwan",
       "comment": "this one too @Ahmed Marwan",
-      "rationale": "The comment only says \"this one too\" with no actual instruction attached, so there's no deterministic edit or creative direction to extract.",
+      "rationale": "The comment gives no action or target beyond 'this one too', with no prior thread context to resolve what it refers to.",
       "jobTitle": null,
       "options": [],
-      "reply": "I wasn't sure what you meant by \"this one too\" here — could you say which element or change you're pointing at? I didn't want to guess and edit the wrong layer."
-    },
-    {
-      "category": "clarification",
-      "file": "Wellth",
-      "author": "Ahmed Marwan",
-      "comment": "make this \"private testing\"",
-      "rationale": "\"Private testing\" doesn't fit this dining/brand-intro section and reads like a likely typo for \"Private Tasting\", so I shouldn't guess at the copy change.",
-      "jobTitle": null,
-      "options": [],
-      "reply": "Quick check before I touch this — did you mean \"Private Tasting\" for the Interior Image caption? \"Private testing\" doesn't quite land next to the dining copy, so I want to confirm the wording before I swap it in."
+      "reply": "Not sure what you meant by 'this one too' here — could you point me to the specific element or change you're referencing? Happy to action it once I know what 'this' is."
     }
   ]
 }

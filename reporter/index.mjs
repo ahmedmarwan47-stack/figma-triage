@@ -15,6 +15,7 @@ import {
   resolveFiles,
   getFileComments,
   getFileAnnotations,
+  getFileStyles,
   getNode,
   getNodeImage,
 } from "./figma.mjs";
@@ -223,6 +224,19 @@ async function main() {
     // no-op — comments still flow through as normal.
     const annotations = await getFileAnnotations(token, file.key);
 
+    // Local paint + text styles — so Claude can't emit names that don't
+    // actually exist in this file (kills the "no local text style 'Label/l'"
+    // class of apply-time failures).
+    let localStyles = { paint: [], text: [] };
+    try {
+      localStyles = await getFileStyles(token, file.key);
+      console.log(
+        `[figma] styles for ${file.key}: ${localStyles.paint.length} paint, ${localStyles.text.length} text`,
+      );
+    } catch (err) {
+      console.warn(`[warn] styles for ${file.key}: ${err.message}`);
+    }
+
     const threads = [
       ...buildThreads(comments),
       ...annotations.map((a) => ({ head: a, replies: [] })),
@@ -254,6 +268,7 @@ async function main() {
         comment: thread.head,
         node,
         thread: thread.replies,
+        localStyles,
       });
 
       const category = HEADINGS[verdict.category]

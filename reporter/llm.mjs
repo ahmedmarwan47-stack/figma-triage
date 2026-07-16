@@ -101,7 +101,7 @@ function distanceRounded(a, b) {
   return Math.round(Math.hypot(a.x - b.x, a.y - b.y));
 }
 
-function buildUserPrompt({ fileName, comment, node, thread }) {
+function buildUserPrompt({ fileName, comment, node, thread, localStyles }) {
   const replies = (thread ?? [])
     .map((r) => `  - ${r.user?.handle ?? "someone"}: ${r.message}`)
     .join("\n");
@@ -146,6 +146,17 @@ function buildUserPrompt({ fileName, comment, node, thread }) {
     ? `COMMENT PIN POSITION (canvas coords): x=${Math.round(pin.x)}, y=${Math.round(pin.y)}`
     : "COMMENT PIN POSITION: unknown";
 
+  const paintList = (localStyles?.paint ?? []).map((n) => `  - ${n}`).join("\n") || "  (none)";
+  const textList = (localStyles?.text ?? []).map((n) => `  - ${n}`).join("\n") || "  (none)";
+  const hasStyles = (localStyles?.paint?.length ?? 0) + (localStyles?.text?.length ?? 0) > 0;
+
+  const stylesBlock = hasStyles
+    ? `LOCAL PAINT STYLES (the ONLY valid values for setFillStyle "styleName" and setTextStyle "colorStyleName" — if the perfect one isn't here, pick the CLOSEST match by family/number, never invent):
+${paintList}
+LOCAL TEXT STYLES (the ONLY valid values for setTextStyle "textStyleName" — omit textStyleName entirely if none of these fit):
+${textList}`
+    : `LOCAL PAINT / TEXT STYLES: (none fetched — pick names cautiously from Ahmed's principles, and prefer to omit style-driven ops if unsure)`;
+
   return `FILE: ${fileName}
 COMMENT (${comment.user?.handle ?? "someone"}): ${comment.message}
 ATTACHED NODE: ${nodeSummary}
@@ -153,6 +164,7 @@ TARGET NODE ID: ${comment.client_meta?.node_id ?? "none"}
 ${pinLine}
 ${inventoryHeader}
 ${textInventory}
+${stylesBlock}
 THREAD REPLIES:
 ${replies || "  (none)"}
 
@@ -201,10 +213,49 @@ function callClaude(userPrompt) {
   });
 }
 
+// Belt-and-braces guard: if Claude still names a style that isn't in the file
+// (rare with the tightened prompt, but possible), strip the offending field
+// rather than emit a job that will throw at apply time. The plugin's ops treat
+// missing fields as no-ops.
+function sanitizeAgainstStyles(verdict, localStyles) {
+  if (!verdict?.job?.ops || !localStyles) return verdict;
+  const paint = new Set(localStyles.paint ?? []);
+  const text = new Set(localStyles.text ?? []);
+  const kept = [];
+  const dropped = [];
+  for (const op of verdict.job.ops) {
+    if (op.op === "setFillStyle" && op.styleName && paint.size && !paint.has(op.styleName)) {
+      dropped.push(`setFillStyle→"${op.styleName}"`);
+      continue;
+    }
+    if (op.op === "setTextStyle") {
+      if (op.textStyleName && text.size && !text.has(op.textStyleName)) {
+        dropped.push(`textStyle→"${op.textStyleName}"`);
+        op.textStyleName = null;
+      }
+      if (op.colorStyleName && paint.size && !paint.has(op.colorStyleName)) {
+        dropped.push(`colorStyle→"${op.colorStyleName}"`);
+        op.colorStyleName = null;
+      }
+      if (!op.textStyleName && !op.colorStyleName) continue;
+    }
+    kept.push(op);
+  }
+  if (dropped.length) {
+    console.warn(`[llm] dropped ops referencing missing styles: ${dropped.join(", ")}`);
+    verdict.job.ops = kept;
+    if (verdict.rationale) {
+      verdict.rationale += ` (dropped ops for missing local styles: ${dropped.join(", ")})`;
+    }
+  }
+  return verdict;
+}
+
 export async function classifyAndDraft(input) {
   try {
     const text = await callClaude(buildUserPrompt(input));
-    return parseVerdict(text);
+    const verdict = parseVerdict(text);
+    return sanitizeAgainstStyles(verdict, input.localStyles);
   } catch (err) {
     // Never crash the whole run on one bad call — degrade to a clarification.
     return {

@@ -122,6 +122,28 @@ export async function getNode(token, fileKey, nodeId) {
   return data.nodes?.[nodeId]?.document ?? null;
 }
 
+/**
+ * Local paint + text styles defined in the file. We feed these to Claude so it
+ * only picks styleName / textStyleName / colorStyleName values that actually
+ * exist in the target file — otherwise setFillStyle / setTextStyle throw at
+ * apply time with "no local style X". Pagination: the endpoint is cursor-based
+ * but the default page (~100) covers a typical design-system file.
+ */
+export async function getFileStyles(token, fileKey) {
+  const data = await figmaGet(token, `/v1/files/${fileKey}/styles`);
+  const raw = data.meta?.styles ?? [];
+  const buckets = { FILL: new Set(), TEXT: new Set(), EFFECT: new Set(), GRID: new Set() };
+  for (const s of raw) {
+    if (buckets[s.style_type] && s.name) buckets[s.style_type].add(s.name);
+  }
+  return {
+    paint: [...buckets.FILL].sort(),
+    text: [...buckets.TEXT].sort(),
+    effect: [...buckets.EFFECT].sort(),
+    grid: [...buckets.GRID].sort(),
+  };
+}
+
 /** A rendered PNG URL for the node (scale 2). URLs are temporary — fine for a daily digest. */
 export async function getNodeImage(token, fileKey, nodeId) {
   const data = await figmaGet(

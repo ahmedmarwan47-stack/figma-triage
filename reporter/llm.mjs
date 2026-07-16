@@ -31,7 +31,11 @@ MECHANICAL JOB — op vocabulary (the ONLY ops the plugin can run; emit nothing 
 - { "op": "duplicateTarget" }                                  // clone the commented node into the review frame (usually the first op)
 - { "op": "setText", "match": "<node name or its current text>", "characters": "<new copy>" }
 - { "op": "setFillStyle", "match": "<node name>", "styleName": "Tone/200" }
-- { "op": "setTextStyle", "match": "<node name>", "textStyleName": "Body/l", "colorStyleName": "Tone/900" }
+- { "op": "setTextStyle", "match": "<node name>", "textStyleName": "Body/l" | null, "colorStyleName": "Tone/900" | null }
+  Either field may be null — supply ONLY what the comment actually asks for.
+  If the comment only mentions color, contrast, tone, or "make it lighter/darker",
+  set textStyleName to null and supply just colorStyleName. Do NOT restyle typography
+  unless the comment explicitly asks to change the font, size, weight, or hierarchy.
 - { "op": "removeNode", "match": "<node name>" }
 - { "op": "cloneNode", "match": "<node name>" }
 "match" targets a descendant of the duplicated node by its layer name (preferred) or, if you don't know the name, a snippet of its current text.

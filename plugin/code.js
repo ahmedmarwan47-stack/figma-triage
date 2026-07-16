@@ -108,18 +108,17 @@ function makeAutoFrame(name) {
   return frame;
 }
 
-async function makeCaption(chars, textStyles, preferred = "Caption/m") {
+// Plugin-side text (labels, captions inside our review frames). Uses plain
+// Inter with no dependency on the user's local text styles — those aren't
+// guaranteed to exist and are fragile to depend on for our own chrome.
+async function makePluginText(chars, { size = 12, bold = false, fill } = {}) {
   const t = figma.createText();
-  if (textStyles.has(preferred)) {
-    await figma.loadFontAsync({ family: "Inter", style: "Regular" }).catch(() => {});
-    t.characters = chars; // placeholder font ok; style overrides metrics
-    await t.setTextStyleIdAsync(textStyles.get(preferred));
-  } else {
-    await figma.loadFontAsync({ family: "Inter", style: "Regular" });
-    t.fontName = { family: "Inter", style: "Regular" };
-    t.fontSize = 12; // 12px floor
-    t.characters = chars;
-  }
+  const style = bold ? "Bold" : "Regular";
+  await figma.loadFontAsync({ family: "Inter", style });
+  t.fontName = { family: "Inter", style };
+  t.fontSize = size;
+  t.characters = chars || " ";
+  if (fill) t.fills = [{ type: "SOLID", color: fill }];
   t.layoutSizingHorizontal = "FILL";
   return t;
 }
@@ -298,35 +297,52 @@ async function applyCreative(entry, targetId, texts) {
     return;
   }
   const outer = makeAutoFrame(`[Comment ${short(entry.commentId)}] Directions`);
-  outer.setPluginData(COMMENT_KEY, String(entry.commentId));
   outer.layoutMode = "HORIZONTAL";
-  outer.itemSpacing = 32;
+  outer.itemSpacing = 24;
+  outer.paddingTop = outer.paddingBottom = 32;
+  outer.paddingLeft = outer.paddingRight = 32;
+
+  // Comment preamble at the top of the outer frame (column of the outer's
+  // main-axis parent — since outer is HORIZONTAL we wrap the comment text
+  // into a sibling row above via a vertical wrapper).
+  const wrapper = makeAutoFrame(`[Claude] Directions ${short(entry.commentId)}`);
+  wrapper.itemSpacing = 20;
+  const commentText = await makePluginText(
+    `“${entry.commentText || ""}”`,
+    { size: 14, bold: true },
+  );
+  wrapper.appendChild(commentText);
+  wrapper.appendChild(outer);
 
   const options = entry.options || [];
   for (const opt of options) {
     const col = makeAutoFrame(opt.label || "Option");
-    // label
-    const label = await makeCaption(opt.label || "Option", texts, "Label/eyebrow");
-    col.appendChild(label);
-    // a working copy of the commented node to explore this direction on
-    if (targetId) {
-      try {
-        col.appendChild(await cloneTarget(targetId));
-      } catch (_) {
-        /* node may be gone; caption still gives Ahmed the direction */
-      }
-    }
-    // the direction caption + a paste-ready AI prompt
-    col.appendChild(await makeCaption(opt.caption || "", texts, "Caption/m"));
+    col.itemSpacing = 12;
+    col.paddingTop = col.paddingBottom = 20;
+    col.paddingLeft = col.paddingRight = 20;
+    col.resize(320, col.height); // fixed column width so text wraps predictably
+    col.primaryAxisSizingMode = "AUTO";
+    col.counterAxisSizingMode = "FIXED";
+    col.strokes = [{ type: "SOLID", color: { r: 0.75, g: 0.75, b: 0.75 } }];
+    col.strokeWeight = 1;
+    col.cornerRadius = 8;
+
+    col.appendChild(await makePluginText(opt.label || "Option", { size: 16, bold: true }));
+    col.appendChild(await makePluginText(opt.caption || "", { size: 12 }));
     if (opt.aiPrompt) {
-      col.appendChild(await makeCaption(`AI prompt: ${opt.aiPrompt}`, texts, "Caption/m"));
+      col.appendChild(await makePluginText("AI prompt:", { size: 11, bold: true }));
+      col.appendChild(await makePluginText(opt.aiPrompt, { size: 11 }));
     }
     outer.appendChild(col);
   }
 
-  placeOnCanvas(outer);
-  figma.currentPage.selection = [outer];
-  figma.viewport.scrollAndZoomIntoView([outer]);
+  // Mark applied AFTER all columns built successfully, so a mid-build failure
+  // doesn't leave a broken frame that's flagged done.
+  wrapper.setPluginData(COMMENT_KEY, String(entry.commentId));
+
+  placeOnCanvas(wrapper);
+  figma.currentPage.selection = [wrapper];
+  figma.viewport.scrollAndZoomIntoView([wrapper]);
 }
 
 // ---- helpers ---------------------------------------------------------------

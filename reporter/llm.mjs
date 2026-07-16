@@ -61,6 +61,9 @@ MECHANICAL JOB — op vocabulary (the ONLY ops the plugin can run; emit nothing 
   unless the comment explicitly asks to change the font, size, weight, or hierarchy.
 - { "op": "removeNode", "match": "<node name>" }
 - { "op": "cloneNode", "match": "<node name>" }
+- { "op": "setFillColor", "match": "<node name>", "hex": "#1a2b3c" }
+  FALLBACK ONLY: use setFillColor when no local paint style fits the requested
+  color. Prefer setFillStyle with a real local style name whenever one exists.
 "match" targets a descendant of the duplicated node by its layer name (preferred) or, if you don't know the name, a snippet of its current text.
 
 OUTPUT — respond with ONLY a single JSON object, no prose, no markdown fences:
@@ -68,10 +71,20 @@ OUTPUT — respond with ONLY a single JSON object, no prose, no markdown fences:
   "category": "mechanical" | "creative" | "clarification" | "not_for_ahmed",
   "rationale": "<one short sentence on why this category>",
   "job": null | { "title": "<short description>", "targetNodeId": "<node id or null>", "ops": [ ...ops ] },
-  "options": null | [ { "label": "<short name>", "caption": "<Caption/m explanation of the direction>", "aiPrompt": "<prompt Ahmed can paste into Figma's native AI agent>" } ],
+  "options": null | [ { "label": "<short name>", "caption": "<one-sentence explanation of the direction>", "ops": [ ...ops ], "aiPrompt": "<prompt Ahmed can paste into Figma's native AI agent>" } ],
   "reply": null | "<first-person suggested reply text>"
 }
-Only the field matching the category is populated; the others are null. For "mechanical" set "job". For "creative" set "options". For "clarification" set "reply". For "not_for_ahmed" leave all three null.`;
+Only the field matching the category is populated; the others are null. For "mechanical" set "job". For "creative" set "options". For "clarification" set "reply". For "not_for_ahmed" leave all three null.
+
+CREATIVE "ops" — each direction option MUST include an "ops" array that COMPILES
+that direction into the same op vocabulary, so the plugin can execute the
+direction on a clone with one click. Be thorough: a recolor direction should
+list a setFillStyle/setFillColor/setTextStyle op for EVERY affected layer you
+can identify from the text inventory and children list (10–40 ops is normal).
+Use exact layer names from the inventory. The "aiPrompt" stays as an
+alternative route for what ops can't express (imagery, layout rework) — if a
+direction is truly not expressible in ops (e.g. "redraw the hero
+illustration"), set its "ops" to [] and rely on the aiPrompt.`;
 
 // Walk the node subtree and collect every TEXT descendant so Claude can target
 // real layer names for setText / setTextStyle instead of guessing. When we know
@@ -232,14 +245,11 @@ function callClaude(userPrompt) {
 // Belt-and-braces guard: if Claude still names a style that isn't in the file
 // (rare with the tightened prompt, but possible), strip the offending field
 // rather than emit a job that will throw at apply time. The plugin's ops treat
-// missing fields as no-ops.
-function sanitizeAgainstStyles(verdict, localStyles) {
-  if (!verdict?.job?.ops || !localStyles) return verdict;
-  const paint = new Set(localStyles.paint ?? []);
-  const text = new Set(localStyles.text ?? []);
+// missing fields as no-ops. Runs over the mechanical job's ops AND each
+// creative option's ops.
+function sanitizeOps(ops, paint, text, dropped) {
   const kept = [];
-  const dropped = [];
-  for (const op of verdict.job.ops) {
+  for (const op of ops) {
     if (op.op === "setFillStyle" && op.styleName && paint.size && !paint.has(op.styleName)) {
       dropped.push(`setFillStyle→"${op.styleName}"`);
       continue;
@@ -257,9 +267,24 @@ function sanitizeAgainstStyles(verdict, localStyles) {
     }
     kept.push(op);
   }
+  return kept;
+}
+
+function sanitizeAgainstStyles(verdict, localStyles) {
+  if (!verdict || !localStyles) return verdict;
+  const paint = new Set(localStyles.paint ?? []);
+  const text = new Set(localStyles.text ?? []);
+  const dropped = [];
+  if (verdict.job?.ops) {
+    verdict.job.ops = sanitizeOps(verdict.job.ops, paint, text, dropped);
+  }
+  for (const opt of verdict.options ?? []) {
+    if (Array.isArray(opt.ops)) {
+      opt.ops = sanitizeOps(opt.ops, paint, text, dropped);
+    }
+  }
   if (dropped.length) {
     console.warn(`[llm] dropped ops referencing missing styles: ${dropped.join(", ")}`);
-    verdict.job.ops = kept;
     if (verdict.rationale) {
       verdict.rationale += ` (dropped ops for missing local styles: ${dropped.join(", ")})`;
     }

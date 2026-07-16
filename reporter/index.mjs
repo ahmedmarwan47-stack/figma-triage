@@ -151,9 +151,12 @@ function formatDigest({ date, buckets, filesScanned }) {
         // drafted directions.
         if (it.imageUrl) lines.push(`   📸 ${it.imageUrl}`);
         for (const opt of it.verdict.options) {
-          lines.push(`   ▸ *${opt.label}* — ${truncate(opt.caption, 160)}`);
+          const applyNote = Array.isArray(opt.ops) && opt.ops.length
+            ? ` _(apply-ready in the plugin — ${opt.ops.length} ops)_`
+            : "";
+          lines.push(`   ▸ *${opt.label}* — ${truncate(opt.caption, 160)}${applyNote}`);
           if (opt.aiPrompt) {
-            lines.push(`      \`AI prompt:\` ${truncate(opt.aiPrompt, 220)}`);
+            lines.push(`      \`AI prompt (alternative):\` ${truncate(opt.aiPrompt, 220)}`);
           }
         }
       }
@@ -170,7 +173,7 @@ function formatDigest({ date, buckets, filesScanned }) {
   if (total > 0) {
     lines.push(
       "",
-      "_Open a file above, run *Claude Comments*, and click Apply on each drafted card. Nothing applies without your click. Creative directions stay in Slack — pick one and paste its AI prompt into Figma's AI agent yourself._",
+      "_Open a file above, run *Claude Comments*, and click Apply on each drafted card. Creative directions each have their own Apply button in the plugin — pick the one you like (the AI prompt is an alternative route). Nothing applies without your click._",
     );
   }
   return lines.join("\n");
@@ -371,10 +374,11 @@ async function main() {
         verdict,
       });
 
-      // Only mechanical jobs become plugin-applied edits. Creative directions
-      // stay in the Slack digest (with the source screenshot) — no in-Figma
-      // render, since drafted directions are judgment prompts, not edits.
-      if (category === "mechanical") {
+      // Mechanical jobs AND creative directions are plugin-executable now:
+      // each creative option carries its own compiled ops, applied per-option
+      // on an explicit click (never in bulk). The Slack digest stays the
+      // decision surface; the aiPrompt remains an alternative route.
+      if (category === "mechanical" || category === "creative") {
         jobs.push({
           commentId: thread.head.id,
           fileKey: file.key,

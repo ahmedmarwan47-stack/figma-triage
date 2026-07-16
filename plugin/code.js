@@ -22,9 +22,11 @@ figma.ui.onmessage = async (msg) => {
     return;
   }
   if (msg.type === "apply") {
+    const optLabel =
+      msg.optionIndex != null ? msg.job.options?.[msg.optionIndex]?.label : null;
     const title =
-      msg.job.job?.title || (msg.job.category === "creative" ? "Direction options" : "Edit");
-    enqueueApply(msg.job, title);
+      optLabel || msg.job.job?.title || (msg.job.category === "creative" ? "Direction options" : "Edit");
+    enqueueApply(msg.job, title, msg.optionIndex);
   }
 };
 
@@ -36,8 +38,8 @@ figma.ui.onmessage = async (msg) => {
 const applyQueue = [];
 let queueRunning = false;
 
-function enqueueApply(job, title) {
-  applyQueue.push({ job, title });
+function enqueueApply(job, title, optionIndex) {
+  applyQueue.push({ job, title, optionIndex });
   runQueue();
 }
 
@@ -46,9 +48,9 @@ async function runQueue() {
   queueRunning = true;
   try {
     while (applyQueue.length) {
-      const { job, title } = applyQueue.shift();
+      const { job, title, optionIndex } = applyQueue.shift();
       try {
-        await applyJob(job);
+        await applyJob(job, optionIndex);
         figma.ui.postMessage({ type: "applied", ok: true, title });
         figma.notify(`Applied: ${title}`);
       } catch (err) {
@@ -214,6 +216,63 @@ async function setTextStyle(root, match, textStyleName, colorStyleName, texts, p
   }
 }
 
+function hexToRgb(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex).trim());
+  if (!m) throw new Error(`bad hex color "${hex}"`);
+  const n = parseInt(m[1], 16);
+  return { r: ((n >> 16) & 255) / 255, g: ((n >> 8) & 255) / 255, b: (n & 255) / 255 };
+}
+
+// Raw-color fallback for files without a matching local style (the reporter
+// instructs Claude to prefer style names and only emit hex when nothing fits).
+async function setFillColor(root, match, hex) {
+  const node = findMatch(root, match);
+  if (!node) throw new Error(`setFillColor: no node for "${match}"`);
+  if (node.type === "TEXT") await loadFontsForNode(node);
+  node.fills = [{ type: "SOLID", color: hexToRgb(hex) }];
+}
+
+// Shared op executor — mechanical jobs and creative direction options both
+// run through here so the vocabulary stays in one place.
+async function runOps(ops, root, frame, { paints, texts }) {
+  for (let i = 0; i < ops.length; i++) {
+    const op = ops[i];
+    try {
+      switch (op.op) {
+        case "duplicateTarget":
+          // No-op: the caller's container already owns the single clone.
+          break;
+        case "setText":
+          await setText(root || frame, op.match, op.characters);
+          break;
+        case "setFillStyle":
+          await setFillStyle(root || frame, op.match, op.styleName, paints);
+          break;
+        case "setFillColor":
+          await setFillColor(root || frame, op.match, op.hex);
+          break;
+        case "setTextStyle":
+          await setTextStyle(root || frame, op.match, op.textStyleName, op.colorStyleName, texts, paints);
+          break;
+        case "removeNode": {
+          const n = findMatch(root || frame, op.match);
+          if (n) n.remove();
+          break;
+        }
+        case "cloneNode": {
+          const n = findMatch(root || frame, op.match);
+          if (n && "clone" in n) n.parent.appendChild(n.clone());
+          break;
+        }
+        default:
+          throw new Error(`unknown op "${op.op}"`);
+      }
+    } catch (err) {
+      throw new Error(`op #${i + 1} "${op.op}" failed: ${errorMessage(err)}`);
+    }
+  }
+}
+
 // ---- job application -------------------------------------------------------
 
 const TARGET_KEY = "claudeCommentsTargetId";
@@ -249,14 +308,14 @@ async function ensureContainerForTarget(targetId) {
   return { frame, root, created: true, applied: new Set() };
 }
 
-async function applyJob(entry) {
+async function applyJob(entry, optionIndex) {
   await ensureClaudePage();
   const paints = await paintStyleMap();
   const texts = await textStyleMap();
   const targetId = entry.job?.targetNodeId || entry.nodeId;
 
   if (entry.category === "creative") {
-    return applyCreative(entry, targetId, texts);
+    return applyCreativeOption(entry, targetId, optionIndex, { paints, texts });
   }
 
   const { frame, root, created, applied } = await ensureContainerForTarget(targetId);
@@ -267,40 +326,7 @@ async function applyJob(entry) {
     return;
   }
 
-  const ops = entry.job?.ops || [];
-  for (let i = 0; i < ops.length; i++) {
-    const op = ops[i];
-    try {
-      switch (op.op) {
-        case "duplicateTarget":
-          // No-op: the container already holds the single clone we share.
-          break;
-        case "setText":
-          await setText(root || frame, op.match, op.characters);
-          break;
-        case "setFillStyle":
-          await setFillStyle(root || frame, op.match, op.styleName, paints);
-          break;
-        case "setTextStyle":
-          await setTextStyle(root || frame, op.match, op.textStyleName, op.colorStyleName, texts, paints);
-          break;
-        case "removeNode": {
-          const n = findMatch(root || frame, op.match);
-          if (n) n.remove();
-          break;
-        }
-        case "cloneNode": {
-          const n = findMatch(root || frame, op.match);
-          if (n && "clone" in n) n.parent.appendChild(n.clone());
-          break;
-        }
-        default:
-          throw new Error(`unknown op "${op.op}"`);
-      }
-    } catch (err) {
-      throw new Error(`op #${i + 1} "${op.op}" failed: ${errorMessage(err)}`);
-    }
-  }
+  await runOps(entry.job?.ops || [], root, frame, { paints, texts });
 
   applied.add(String(entry.commentId));
   frame.setPluginData(APPLIED_KEY, [...applied].join(","));
@@ -310,63 +336,48 @@ async function applyJob(entry) {
   figma.viewport.scrollAndZoomIntoView([frame]);
 }
 
-async function applyCreative(entry, targetId, texts) {
+// A creative direction applies like a mechanical job, but onto its OWN clone
+// (one per option, labeled), so you can Apply two directions side by side and
+// compare. Direction ops are Claude's compilation of the direction into the
+// declarative vocabulary; the aiPrompt remains available as an alternative
+// path through Figma's native AI.
+async function applyCreativeOption(entry, targetId, optionIndex, styleMaps) {
+  const options = entry.options || [];
+  const opt = options[optionIndex];
+  if (!opt) throw new Error(`no direction option at index ${optionIndex}`);
+
+  const dedupKey = `${entry.commentId}:${optionIndex}`;
   const existing = figma.currentPage.findOne(
-    (n) => n.type === "FRAME" && n.getPluginData(COMMENT_KEY) === String(entry.commentId),
+    (n) => n.type === "FRAME" && n.getPluginData(COMMENT_KEY) === dedupKey,
   );
   if (existing) {
-    figma.notify(`Already applied: ${entry.job?.title || "Directions"}`);
+    figma.notify(`Already applied: ${opt.label || "Direction"}`);
     figma.currentPage.selection = [existing];
     figma.viewport.scrollAndZoomIntoView([existing]);
     return;
   }
-  const outer = makeAutoFrame(`[Comment ${short(entry.commentId)}] Directions`);
-  outer.layoutMode = "HORIZONTAL";
-  outer.itemSpacing = 24;
-  outer.paddingTop = outer.paddingBottom = 32;
-  outer.paddingLeft = outer.paddingRight = 32;
 
-  // Comment preamble at the top of the outer frame (column of the outer's
-  // main-axis parent — since outer is HORIZONTAL we wrap the comment text
-  // into a sibling row above via a vertical wrapper).
-  const wrapper = makeAutoFrame(`[Claude] Directions ${short(entry.commentId)}`);
-  wrapper.itemSpacing = 20;
-  const commentText = await makePluginText(
-    `“${entry.commentText || ""}”`,
-    { size: 14, bold: true },
+  const frame = makeAutoFrame(`[Direction] ${opt.label || `Option ${optionIndex + 1}`}`);
+  frame.appendChild(
+    await makePluginText(`“${entry.commentText || ""}” → ${opt.label || ""}`, {
+      size: 13,
+      bold: true,
+    }),
   );
-  wrapper.appendChild(commentText);
-  wrapper.appendChild(outer);
+  if (opt.caption) frame.appendChild(await makePluginText(opt.caption, { size: 11 }));
 
-  const options = entry.options || [];
-  for (const opt of options) {
-    const col = makeAutoFrame(opt.label || "Option");
-    col.itemSpacing = 12;
-    col.paddingTop = col.paddingBottom = 20;
-    col.paddingLeft = col.paddingRight = 20;
-    col.resize(320, col.height); // fixed column width so text wraps predictably
-    col.primaryAxisSizingMode = "AUTO";
-    col.counterAxisSizingMode = "FIXED";
-    col.strokes = [{ type: "SOLID", color: { r: 0.75, g: 0.75, b: 0.75 } }];
-    col.strokeWeight = 1;
-    col.cornerRadius = 8;
+  const root = await cloneTarget(targetId);
+  frame.appendChild(root);
 
-    col.appendChild(await makePluginText(opt.label || "Option", { size: 16, bold: true }));
-    col.appendChild(await makePluginText(opt.caption || "", { size: 12 }));
-    if (opt.aiPrompt) {
-      col.appendChild(await makePluginText("AI prompt:", { size: 11, bold: true }));
-      col.appendChild(await makePluginText(opt.aiPrompt, { size: 11 }));
-    }
-    outer.appendChild(col);
-  }
+  await runOps(opt.ops || [], root, frame, styleMaps);
 
-  // Mark applied AFTER all columns built successfully, so a mid-build failure
-  // doesn't leave a broken frame that's flagged done.
-  wrapper.setPluginData(COMMENT_KEY, String(entry.commentId));
+  // Mark applied only after the ops all succeeded, so a failed direction can
+  // be retried after fixing the draft.
+  frame.setPluginData(COMMENT_KEY, dedupKey);
 
-  placeOnCanvas(wrapper);
-  figma.currentPage.selection = [wrapper];
-  figma.viewport.scrollAndZoomIntoView([wrapper]);
+  placeOnCanvas(frame);
+  figma.currentPage.selection = [frame];
+  figma.viewport.scrollAndZoomIntoView([frame]);
 }
 
 // ---- helpers ---------------------------------------------------------------

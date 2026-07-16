@@ -140,19 +140,42 @@ export async function getNode(token, fileKey, nodeId) {
 }
 
 /**
- * Local paint + text styles defined in the file. We feed these to Claude so it
+ * Paint + text styles available in the file. We feed these to Claude so it
  * only picks styleName / textStyleName / colorStyleName values that actually
  * exist in the target file — otherwise setFillStyle / setTextStyle throw at
- * apply time with "no local style X". Pagination: the endpoint is cursor-based
- * but the default page (~100) covers a typical design-system file.
+ * apply time with "no local style X".
+ *
+ * Two sources, merged:
+ *  - GET /v1/files/:key → top-level `styles` map: every style REFERENCED in
+ *    the document, including unpublished local styles. (The /styles endpoint
+ *    alone returned 0 for a file where the plugin happily resolved Navy/800 —
+ *    that endpoint only lists PUBLISHED styles.)
+ *  - GET /v1/files/:key/styles → published styles, kept as a supplement.
  */
 export async function getFileStyles(token, fileKey) {
-  const data = await figmaGet(token, `/v1/files/${fileKey}/styles`);
-  const raw = data.meta?.styles ?? [];
   const buckets = { FILL: new Set(), TEXT: new Set(), EFFECT: new Set(), GRID: new Set() };
-  for (const s of raw) {
-    if (buckets[s.style_type] && s.name) buckets[s.style_type].add(s.name);
+
+  try {
+    const doc = await figmaGet(token, `/v1/files/${fileKey}?depth=1`);
+    for (const s of Object.values(doc.styles ?? {})) {
+      // remote === true means a library style — the plugin resolves styles via
+      // getLocalPaintStylesAsync, so only local ones are usable in ops.
+      if (s.remote) continue;
+      if (buckets[s.styleType] && s.name) buckets[s.styleType].add(s.name);
+    }
+  } catch (err) {
+    console.warn(`[figma] document styles for ${fileKey}: ${err.message}`);
   }
+
+  try {
+    const pub = await figmaGet(token, `/v1/files/${fileKey}/styles`);
+    for (const s of pub.meta?.styles ?? []) {
+      if (buckets[s.style_type] && s.name) buckets[s.style_type].add(s.name);
+    }
+  } catch (err) {
+    console.warn(`[figma] published styles for ${fileKey}: ${err.message}`);
+  }
+
   return {
     paint: [...buckets.FILL].sort(),
     text: [...buckets.TEXT].sort(),

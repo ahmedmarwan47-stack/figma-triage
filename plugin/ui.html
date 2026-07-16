@@ -3,10 +3,12 @@
   body { font: 12px/1.45 Inter, -apple-system, sans-serif; margin: 0; padding: 12px; }
   h2 { font-size: 12px; margin: 0 0 8px; text-transform: uppercase; letter-spacing: .04em; opacity: .6; }
   .row { display: flex; gap: 6px; margin-bottom: 10px; align-items: center; }
-  input[type=text], input:not([type]) { flex: 1; padding: 6px 8px; border: 1px solid rgba(128,128,128,.4); border-radius: 6px; font: inherit; }
+  input { flex: 1; padding: 6px 8px; border: 1px solid rgba(128,128,128,.4); border-radius: 6px; font: inherit; }
   button { padding: 6px 10px; border: 0; border-radius: 6px; background: #0d99ff; color: #fff; font: inherit; cursor: pointer; }
   button.secondary { background: rgba(128,128,128,.18); color: inherit; }
   button:disabled { opacity: .5; cursor: default; }
+  a { color: #0d99ff; text-decoration: none; }
+  a:hover { text-decoration: underline; }
   .card { border: 1px solid rgba(128,128,128,.28); border-radius: 8px; padding: 10px; margin-bottom: 10px; }
   .card img { width: 100%; max-height: 140px; object-fit: contain; border-radius: 4px; background: rgba(128,128,128,.08); margin-bottom: 8px; }
   .tag { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 999px; margin-bottom: 6px; }
@@ -17,10 +19,11 @@
   .muted { opacity: .6; }
   .empty { opacity: .6; padding: 24px 8px; text-align: center; }
   .cardfoot { display: flex; justify-content: flex-end; margin-top: 6px; }
-  .autobar { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid rgba(128,128,128,.28); border-radius: 6px; margin-bottom: 10px; background: rgba(13,153,255,.06); }
-  .autobar label { flex: 1; cursor: pointer; }
-  .autobar .dot { width: 8px; height: 8px; border-radius: 50%; background: rgba(128,128,128,.5); }
-  .autobar.on .dot { background: #1a7f37; box-shadow: 0 0 0 3px rgba(26,127,55,.15); }
+  .others { border: 1px dashed rgba(128,128,128,.35); border-radius: 8px; padding: 10px; margin-top: 14px; }
+  .others h3 { font-size: 11px; margin: 0 0 8px; text-transform: uppercase; letter-spacing: .04em; opacity: .55; }
+  .filerow { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-top: 1px solid rgba(128,128,128,.15); }
+  .filerow:first-of-type { border-top: 0; }
+  .filerow .count { font-size: 10px; opacity: .6; }
   @media (prefers-color-scheme: dark) {
     .tag.mechanical { background: #123a20; color: #4ac26b; }
     .tag.creative { background: #3a2a12; color: #e0a34a; }
@@ -31,32 +34,23 @@
   <input id="base" placeholder="jobs base URL, e.g. https://raw.githubusercontent.com/owner/repo/main/jobs" />
   <button id="load">Load</button>
 </div>
-
-<div class="autobar" id="autobar">
-  <span class="dot"></span>
-  <label><input type="checkbox" id="autoApply" /> Auto-apply new drafts</label>
-  <span class="muted" id="autoStatus"></span>
-</div>
-
 <div class="row">
-  <button id="applyAll" class="secondary" disabled>Apply all</button>
+  <button id="applyAll" class="secondary" disabled>Apply all for this file</button>
   <span id="status" class="muted" style="align-self:center"></span>
 </div>
 
-<h2 id="heading" style="display:none">Today’s drafts</h2>
+<h2 id="heading" style="display:none">Drafts for this file</h2>
 <div id="list"></div>
+
+<div class="others" id="others" style="display:none">
+  <h3>Other files with pending drafts</h3>
+  <div id="othersList"></div>
+</div>
 
 <script>
   let fileKey = null;
-  let jobs = [];
-  let autoApply = false;
-  let pollTimer = null;
-  const POLL_MS = 60_000; // one minute — jobs only change when the daily workflow runs
-  // In-memory set of commentIds we've dispatched to code.js this session, so the
-  // poll loop doesn't re-fire Apply on the same job over and over between polls.
-  // Cross-session idempotency is handled in code.js by the APPLIED_KEY plugin data
-  // on the container frame — this set just keeps the UI from thrashing.
-  const sentThisSession = new Set();
+  let jobs = [];         // jobs for THIS file
+  let byOtherFile = {};  // { fileKey: { name, count } } — jobs for other files
 
   const $ = (id) => document.getElementById(id);
   const post = (msg) => parent.postMessage({ pluginMessage: msg }, "*");
@@ -64,102 +58,92 @@
   $("load").onclick = () => loadJobs();
   $("base").onchange = () => post({ type: "saveBase", jobsBaseUrl: $("base").value.trim() });
   $("applyAll").onclick = () => {
-    for (const j of jobs) fireApply(j);
+    for (const j of jobs) post({ type: "apply", job: j });
     setStatus(`Applying ${jobs.length}…`);
   };
-  $("autoApply").onchange = (e) => {
-    autoApply = e.target.checked;
-    $("autobar").classList.toggle("on", autoApply);
-    post({ type: "setAutoApply", autoApply });
-    updateAutoStatus();
-    if (autoApply) {
-      // Fire an immediate check + apply, then start the interval.
-      loadJobs({ autoApply: true });
-      startPolling();
-    } else {
-      stopPolling();
-    }
-  };
-
-  function fireApply(job) {
-    if (!job || sentThisSession.has(job.commentId)) return;
-    sentThisSession.add(job.commentId);
-    post({ type: "apply", job });
-  }
 
   function setStatus(t) { $("status").textContent = t || ""; }
 
-  function updateAutoStatus() {
-    const el = $("autoStatus");
-    if (!autoApply) return (el.textContent = "off");
-    el.textContent = `on — checking every ${Math.round(POLL_MS / 1000)}s`;
-  }
-
-  function startPolling() {
-    stopPolling();
-    pollTimer = setInterval(() => loadJobs({ autoApply: true, silent: true }), POLL_MS);
-  }
-  function stopPolling() {
-    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-  }
-
-  async function loadJobs({ autoApply: doAuto = false, silent = false } = {}) {
+  async function loadJobs() {
     const base = $("base").value.trim().replace(/\/$/, "");
-    if (!base) return silent || setStatus("Set a jobs base URL first.");
+    if (!base) return setStatus("Set a jobs base URL first.");
     post({ type: "saveBase", jobsBaseUrl: base });
-    if (!silent) setStatus("Loading…");
+    setStatus("Loading…");
     try {
-      // Cache-bust the raw.githubusercontent CDN edge cache so a fresh workflow
-      // commit is reflected within a poll cycle instead of a 5-min TTL.
+      // Cache-bust so a fresh workflow commit shows up right away instead of
+      // sitting inside raw.githubusercontent's edge cache.
       const res = await fetch(`${base}/latest.json?t=${Date.now()}`, { cache: "no-store" });
       if (!res.ok) throw new Error(res.status + " " + res.statusText);
       const data = await res.json();
       const all = data.jobs || [];
       jobs = all.filter((j) => !fileKey || j.fileKey === fileKey);
-      render(all.length);
-      if (!silent) setStatus(`${jobs.length} for this file (${data.date}).`);
-      if (doAuto && jobs.length) {
-        // Push every job we haven't dispatched this session. code.js's
-        // per-comment applied guard will skip anything already applied
-        // in a previous session, so this is safe to spam.
-        let sent = 0;
-        for (const j of jobs) {
-          if (!sentThisSession.has(j.commentId)) { fireApply(j); sent++; }
-        }
-        if (sent) setStatus(`Auto-applying ${sent} new draft(s)…`);
+      byOtherFile = {};
+      for (const j of all) {
+        if (fileKey && j.fileKey === fileKey) continue;
+        const entry = byOtherFile[j.fileKey] || { name: j.fileName || j.fileKey, count: 0 };
+        entry.count++;
+        byOtherFile[j.fileKey] = entry;
       }
+      render(all.length, data.date);
+      const otherCount = Object.values(byOtherFile).reduce((n, e) => n + e.count, 0);
+      const suffix = otherCount ? `; ${otherCount} in other file(s)` : "";
+      setStatus(`${jobs.length} for this file${suffix} (${data.date}).`);
     } catch (e) {
-      if (!silent) setStatus("Load failed: " + e.message);
+      setStatus("Load failed: " + e.message);
     }
   }
 
-  function render(totalAllFiles) {
+  function render(totalAllFiles, date) {
     const list = $("list");
     list.innerHTML = "";
     $("heading").style.display = jobs.length ? "block" : "none";
     $("applyAll").disabled = jobs.length === 0;
     if (!jobs.length) {
       list.innerHTML = `<div class="empty">No drafts for this file.${
-        totalAllFiles ? ` (${totalAllFiles} exist for other files.)` : ""
+        totalAllFiles ? ` (${totalAllFiles} exist across other files — see below.)` : ""
       }</div>`;
+    } else {
+      jobs.forEach((j) => {
+        const card = document.createElement("div");
+        card.className = "card";
+        const title = j.job?.title || (j.category === "creative" ? "Direction options" : "Edit");
+        card.innerHTML = `
+          <span class="tag ${j.category}">${j.category}</span>
+          ${j.imageUrl ? `<img src="${j.imageUrl}" alt="" />` : ""}
+          <p class="title">${escapeHtml(title)}</p>
+          <p class="comment">"${escapeHtml(j.commentText || "")}"</p>
+          <div class="cardfoot"><button>Apply</button></div>`;
+        card.querySelector("button").onclick = () => {
+          post({ type: "apply", job: j });
+          setStatus("Applying: " + title);
+        };
+        list.appendChild(card);
+      });
+    }
+    renderOthers();
+  }
+
+  function renderOthers() {
+    const container = $("others");
+    const listEl = $("othersList");
+    listEl.innerHTML = "";
+    const entries = Object.entries(byOtherFile);
+    if (!entries.length) {
+      container.style.display = "none";
       return;
     }
-    jobs.forEach((j, i) => {
-      const card = document.createElement("div");
-      card.className = "card";
-      const title = j.job?.title || (j.category === "creative" ? "Direction options" : "Edit");
-      card.innerHTML = `
-        <span class="tag ${j.category}">${j.category}</span>
-        ${j.imageUrl ? `<img src="${j.imageUrl}" alt="" />` : ""}
-        <p class="title">${escapeHtml(title)}</p>
-        <p class="comment">"${escapeHtml(j.commentText || "")}"</p>
-        <div class="cardfoot"><button data-i="${i}">Apply</button></div>`;
-      card.querySelector("button").onclick = () => {
-        fireApply(j);
-        setStatus("Applying: " + title);
-      };
-      list.appendChild(card);
-    });
+    container.style.display = "block";
+    for (const [key, entry] of entries) {
+      const row = document.createElement("div");
+      row.className = "filerow";
+      row.innerHTML = `
+        <div>
+          <div style="font-weight:600">${escapeHtml(entry.name)}</div>
+          <div class="count">${entry.count} draft(s)</div>
+        </div>
+        <a href="https://www.figma.com/design/${encodeURIComponent(key)}/" target="_blank" rel="noopener">Open →</a>`;
+      listEl.appendChild(row);
+    }
   }
 
   function escapeHtml(s) {
@@ -172,16 +156,7 @@
     if (msg.type === "init") {
       fileKey = msg.fileKey;
       if (msg.jobsBaseUrl) $("base").value = msg.jobsBaseUrl;
-      if (typeof msg.autoApply === "boolean") {
-        autoApply = msg.autoApply;
-        $("autoApply").checked = autoApply;
-        $("autobar").classList.toggle("on", autoApply);
-      }
-      updateAutoStatus();
-      if (msg.jobsBaseUrl) {
-        loadJobs({ autoApply });
-        if (autoApply) startPolling();
-      }
+      if (msg.jobsBaseUrl) loadJobs();
     } else if (msg.type === "applied") {
       setStatus(msg.ok ? `✓ ${msg.title}` : `✗ ${msg.title}: ${msg.error}`);
     }

@@ -38,7 +38,9 @@ export async function getProjectFiles(token, projectId) {
 /**
  * Resolve the full set of file keys to scan: explicit config.fileKeys plus
  * every file discovered by walking each configured team → projects → files.
- * Returns [{ key, name }].
+ * Returns [{ key, name }]. Explicit fileKeys start with `name = key`; we
+ * upgrade to the real file name via `GET /v1/files/:key?depth=1` (cheap —
+ * depth=1 skips the full document tree).
  */
 export async function resolveFiles(token, { teamIds = [], fileKeys = [] }) {
   const byKey = new Map();
@@ -56,6 +58,21 @@ export async function resolveFiles(token, { teamIds = [], fileKeys = [] }) {
       }
     }
   }
+
+  // Resolve friendly names for entries where name still equals the key
+  // (i.e. came in through explicit fileKeys, not team walking).
+  await Promise.all(
+    [...byKey.values()].map(async (entry) => {
+      if (entry.name && entry.name !== entry.key) return;
+      try {
+        const data = await figmaGet(token, `/v1/files/${entry.key}?depth=1`);
+        if (data.name) entry.name = data.name;
+      } catch (err) {
+        // Keep the key as name — better than crashing the run.
+        console.warn(`[figma] couldn't resolve file name for ${entry.key}: ${err.message}`);
+      }
+    }),
+  );
 
   return [...byKey.values()];
 }

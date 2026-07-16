@@ -105,6 +105,34 @@ const HEADINGS = {
 function formatDigest({ date, buckets, filesScanned }) {
   const lines = [`*Figma triage — ${date}*  (${filesScanned} file(s) scanned)`];
 
+  // Files-with-drafts summary: shows at a glance which files have mechanical
+  // drafts to apply, so you don't have to guess which file to open.
+  const perFile = new Map(); // fileName → { link, mechanical, creative, clarify }
+  for (const cat of ["mechanical", "creative", "clarification"]) {
+    for (const it of buckets[cat]) {
+      const entry = perFile.get(it.fileName) || {
+        fileLink: fileLink(it.fileKey || "", null),
+        mechanical: 0,
+        creative: 0,
+        clarify: 0,
+      };
+      if (cat === "mechanical") entry.mechanical++;
+      else if (cat === "creative") entry.creative++;
+      else entry.clarify++;
+      perFile.set(it.fileName, entry);
+    }
+  }
+  if (perFile.size) {
+    lines.push("", "*📥 Files with drafts today*");
+    for (const [name, e] of perFile) {
+      const parts = [];
+      if (e.mechanical) parts.push(`${e.mechanical} mechanical`);
+      if (e.creative) parts.push(`${e.creative} creative`);
+      if (e.clarify) parts.push(`${e.clarify} to clarify`);
+      lines.push(`• <${e.fileLink}|${name}> — ${parts.join(", ")}`);
+    }
+  }
+
   for (const cat of ["mechanical", "creative", "clarification", "not_for_ahmed"]) {
     const items = buckets[cat];
     if (!items.length) continue;
@@ -142,7 +170,7 @@ function formatDigest({ date, buckets, filesScanned }) {
   if (total > 0) {
     lines.push(
       "",
-      "_Open the *Claude Comments* plugin in the file to apply mechanical drafts. Creative directions stay here in Slack — pick one and paste its AI prompt into Figma's native AI agent yourself. Clarification replies are drafts only — post them yourself after a glance._",
+      "_Open a file above, run *Claude Comments*, and click Apply on each drafted card. Nothing applies without your click. Creative directions stay in Slack — pick one and paste its AI prompt into Figma's AI agent yourself._",
     );
   }
   return lines.join("\n");
@@ -277,6 +305,7 @@ async function main() {
 
       buckets[category].push({
         fileName: file.name,
+        fileKey: file.key,
         link: fileLink(file.key, nodeId),
         commentAuthor: thread.head.user?.handle ?? "someone",
         commentText: thread.head.message,

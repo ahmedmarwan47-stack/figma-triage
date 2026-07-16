@@ -24,20 +24,44 @@ figma.ui.onmessage = async (msg) => {
   if (msg.type === "apply") {
     const title =
       msg.job.job?.title || (msg.job.category === "creative" ? "Direction options" : "Edit");
-    try {
-      await applyJob(msg.job);
-      figma.ui.postMessage({ type: "applied", ok: true, title });
-      figma.notify(`Applied: ${title}`);
-    } catch (err) {
-      // Some Figma Plugin API rejections don't carry a .message — fall back to
-      // stringifying so we never surface "Failed: undefined" with no clue.
-      const errMsg = errorMessage(err);
-      console.error("[Claude Comments] apply failed:", err);
-      figma.ui.postMessage({ type: "applied", ok: false, title, error: errMsg });
-      figma.notify(`Failed: ${errMsg}`, { error: true });
-    }
+    enqueueApply(msg.job, title);
   }
 };
+
+// Serialize apply operations so back-to-back Applies (from "Apply all" or
+// two clicks in a row) don't race inside ensureContainerForTarget. Without
+// this, apply #2's findOne fires BEFORE apply #1's newly-created container
+// has been fully set up, so both create separate containers and you end up
+// with N duplicated source subtrees on the Claude Comments page.
+const applyQueue = [];
+let queueRunning = false;
+
+function enqueueApply(job, title) {
+  applyQueue.push({ job, title });
+  runQueue();
+}
+
+async function runQueue() {
+  if (queueRunning) return;
+  queueRunning = true;
+  try {
+    while (applyQueue.length) {
+      const { job, title } = applyQueue.shift();
+      try {
+        await applyJob(job);
+        figma.ui.postMessage({ type: "applied", ok: true, title });
+        figma.notify(`Applied: ${title}`);
+      } catch (err) {
+        const errMsg = errorMessage(err);
+        console.error("[Claude Comments] apply failed:", err);
+        figma.ui.postMessage({ type: "applied", ok: false, title, error: errMsg });
+        figma.notify(`Failed: ${errMsg}`, { error: true });
+      }
+    }
+  } finally {
+    queueRunning = false;
+  }
+}
 
 function errorMessage(err) {
   if (!err) return "unknown error";

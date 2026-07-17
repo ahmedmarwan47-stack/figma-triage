@@ -181,7 +181,9 @@ function formatDigest({ date, buckets, clarificationsInline }) {
       } else {
         line = `❓ <${it.link}|${truncate(it.commentText, 80)}>`;
         if (clarificationsInline && it.verdict.reply) {
-          line += `\n💬 _draft reply:_ ${truncate(it.verdict.reply, 200)}`;
+          // Webhook-only mode has no per-item thread, so show the full drafted
+          // reply here (bot mode shows it in the item's own message instead).
+          line += `\n💬 *Suggested reply:*\n>${truncate(it.verdict.reply, 1200).replace(/\n/g, "\n>")}`;
         }
       }
       const block = mrkdwnSection(line);
@@ -237,11 +239,13 @@ async function sendDigest({ botMode, botToken, channelId, payload }) {
 function formatClarificationMessage(it) {
   const lines = [
     `❓ *Needs your input* — <${it.link}|${it.fileName}>`,
-    `> ${it.commentAuthor}: "${truncate(it.commentText, 200)}"`,
+    `> ${it.commentAuthor}: "${truncate(it.commentText, 400)}"`,
     `_${it.rationale}_`,
   ];
   if (it.imageUrl) lines.push(`📸 ${it.imageUrl}`);
-  if (it.verdict.reply) lines.push(`💬 _Suggested thread reply:_ ${truncate(it.verdict.reply, 260)}`);
+  // Full drafted reply so you can judge/edit it before sending — capped only
+  // to stay well under Slack's per-message limit.
+  if (it.verdict.reply) lines.push(`💬 *Suggested reply to review:*\n>${truncate(it.verdict.reply, 1500).replace(/\n/g, "\n>")}`);
   lines.push(
     "",
     "*Reply in this thread:*",

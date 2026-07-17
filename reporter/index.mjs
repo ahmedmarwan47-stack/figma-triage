@@ -129,79 +129,61 @@ const HEADINGS = {
   not_for_ahmed: "🙈 Not for you — flagged and skipped",
 };
 
-function formatDigest({ date, buckets, filesScanned }) {
-  const lines = [`*Figma triage — ${date}*  (${filesScanned} file(s) scanned)`];
+// Compact digest: one line per comment, grouped by file. Full details
+// (rationales, ops, AI prompts, screenshots) live in the plugin and the jobs
+// file — the digest is a scannable index, not the record. Clarifications get
+// their own threadable messages in bot mode; in webhook-only mode their draft
+// replies are inlined here (there's nowhere else for them).
+function formatDigest({ date, buckets, filesScanned, clarificationsInline }) {
+  const mech = buckets.mechanical.length;
+  const crea = buckets.creative.length;
+  const clar = buckets.clarification.length;
+  const skip = buckets.not_for_ahmed.length;
 
-  // Files-with-drafts summary: shows at a glance which files have mechanical
-  // drafts to apply, so you don't have to guess which file to open.
-  const perFile = new Map(); // fileName → { link, mechanical, creative, clarify }
+  const counts = [];
+  if (mech) counts.push(`${mech} apply-ready`);
+  if (crea) counts.push(`${crea} direction set${crea > 1 ? "s" : ""}`);
+  if (clar) counts.push(`${clar} need${clar === 1 ? "s" : ""} input`);
+  if (skip) counts.push(`${skip} skipped`);
+  const lines = [`*Figma triage — ${date}* · ${counts.join(" · ") || "nothing new"}`];
+
+  // Group actionable items by file, one line each.
+  const byFile = new Map();
   for (const cat of ["mechanical", "creative", "clarification"]) {
     for (const it of buckets[cat]) {
-      const entry = perFile.get(it.fileName) || {
-        fileLink: fileLink(it.fileKey || "", null),
-        mechanical: 0,
-        creative: 0,
-        clarify: 0,
-      };
-      if (cat === "mechanical") entry.mechanical++;
-      else if (cat === "creative") entry.creative++;
-      else entry.clarify++;
-      perFile.set(it.fileName, entry);
-    }
-  }
-  if (perFile.size) {
-    lines.push("", "*📥 Files with drafts today*");
-    for (const [name, e] of perFile) {
-      const parts = [];
-      if (e.mechanical) parts.push(`${e.mechanical} mechanical`);
-      if (e.creative) parts.push(`${e.creative} creative`);
-      if (e.clarify) parts.push(`${e.clarify} to clarify`);
-      lines.push(`• <${e.fileLink}|${name}> — ${parts.join(", ")}`);
+      const list = byFile.get(it.fileName) ?? [];
+      list.push({ cat, it });
+      byFile.set(it.fileName, list);
     }
   }
 
-  for (const cat of ["mechanical", "creative", "clarification", "not_for_ahmed"]) {
-    const items = buckets[cat];
-    if (!items.length) continue;
-    lines.push("", `*${HEADINGS[cat]}*`);
-    for (const it of items) {
-      lines.push(
-        `• <${it.link}|${it.fileName}> — ${it.commentAuthor}: "${truncate(it.commentText, 140)}"`,
-      );
-      lines.push(`   _${it.rationale}_`);
-      if (cat === "mechanical" && it.verdict.job) {
-        lines.push(`   → ${it.verdict.job.title} (${it.verdict.job.ops.length} op(s))`);
-      }
-      if (cat === "creative" && it.verdict.options) {
-        // Bare URL on its own line — Slack unfurls S3 image URLs into an
-        // inline preview so the reviewer sees the source frame alongside the
-        // drafted directions.
-        if (it.imageUrl) lines.push(`   📸 ${it.imageUrl}`);
-        for (const opt of it.verdict.options) {
-          const applyNote = Array.isArray(opt.ops) && opt.ops.length
-            ? ` _(apply-ready in the plugin — ${opt.ops.length} ops)_`
-            : "";
-          lines.push(`   ▸ *${opt.label}* — ${truncate(opt.caption, 160)}${applyNote}`);
-          if (opt.aiPrompt) {
-            lines.push(`      \`AI prompt (alternative):\` ${truncate(opt.aiPrompt, 220)}`);
-          }
+  for (const [fileName, items] of byFile) {
+    lines.push("", `*${fileName}*`);
+    for (const { cat, it } of items) {
+      if (cat === "mechanical") {
+        const label = it.verdict.job?.title || truncate(it.commentText, 80);
+        lines.push(`⚙️ <${it.link}|${truncate(label, 90)}>`);
+      } else if (cat === "creative") {
+        const n = (it.verdict.options ?? []).length;
+        lines.push(
+          `🎨 <${it.link}|${truncate(it.commentText, 80)}> — ${n} direction${n === 1 ? "" : "s"} in the plugin`,
+        );
+      } else {
+        lines.push(`❓ <${it.link}|${truncate(it.commentText, 80)}>`);
+        if (clarificationsInline && it.verdict.reply) {
+          lines.push(`    💬 _draft reply:_ ${truncate(it.verdict.reply, 200)}`);
         }
       }
-      if (cat === "clarification" && it.verdict.reply) {
-        lines.push(`   💬 _Draft reply:_ ${truncate(it.verdict.reply, 260)}`);
-      }
     }
   }
 
-  const total =
-    buckets.mechanical.length +
-    buckets.creative.length +
-    buckets.clarification.length;
-  if (total > 0) {
-    lines.push(
-      "",
-      "_Open a file above, run *Claude Comments*, and click Apply on each drafted card. Creative directions each have their own Apply button in the plugin — pick the one you like (the AI prompt is an alternative route). Nothing applies without your click._",
-    );
+  if (mech + crea > 0 || clar > 0) {
+    const clarNote = clarificationsInline
+      ? ""
+      : clar > 0
+        ? " ❓ items follow as separate messages — reply in their threads."
+        : "";
+    lines.push("", `_⚙️ + 🎨 are apply-ready in the *Claude Comments* plugin.${clarNote}_`);
   }
   return lines.join("\n");
 }
@@ -489,14 +471,20 @@ async function main() {
     buckets.creative.length +
     buckets.clarification.length;
 
+  const botToken = process.env.SLACK_BOT_TOKEN;
+  const channelId = process.env.SLACK_CHANNEL_ID;
+  const botMode = !!(botToken && channelId);
+
   const digestText =
     totalActionable === 0 && buckets.not_for_ahmed.length === 0
       ? `*Figma triage — ${today}*\nNo new mentions today.`
-      : formatDigest({ date: today, buckets, filesScanned: files.length });
-
-  const botToken = process.env.SLACK_BOT_TOKEN;
-  const channelId = process.env.SLACK_CHANNEL_ID;
-  if (botToken && channelId) {
+      : formatDigest({
+          date: today,
+          buckets,
+          filesScanned: files.length,
+          clarificationsInline: !botMode,
+        });
+  if (botMode) {
     // Bot transport: digest first, then each clarification as its OWN message
     // carrying a ref marker. A thread reply on that message is routed back to
     // the matching Figma comment by worker/ and consumed on the next run.

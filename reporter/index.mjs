@@ -575,7 +575,9 @@ async function main() {
     for (const it of buckets[cat]) {
       report.push({
         category: cat,
+        commentId: it.commentId,
         file: it.fileName,
+        fileKey: it.fileKey,
         author: it.commentAuthor,
         comment: it.commentText,
         rationale: it.rationale,

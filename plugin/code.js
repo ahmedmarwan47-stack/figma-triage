@@ -366,10 +366,32 @@ async function applyCreativeOption(entry, targetId, optionIndex, styleMaps) {
   );
   if (opt.caption) frame.appendChild(await makePluginText(opt.caption, { size: 11 }));
 
-  const root = await cloneTarget(targetId);
-  frame.appendChild(root);
+  // Before / after, side by side: an untouched clone next to the clone the
+  // direction ops run on, each under a label.
+  const row = makeAutoFrame("Before / After");
+  row.layoutMode = "HORIZONTAL";
+  row.itemSpacing = 48;
+  row.paddingTop = row.paddingBottom = 0;
+  row.paddingLeft = row.paddingRight = 0;
 
-  await runOps(opt.ops || [], root, frame, styleMaps);
+  const beforeCol = makeAutoFrame("Before");
+  beforeCol.paddingTop = beforeCol.paddingBottom = 0;
+  beforeCol.paddingLeft = beforeCol.paddingRight = 0;
+  beforeCol.appendChild(await makePluginText("BEFORE", { size: 11, bold: true }));
+  beforeCol.appendChild(await cloneTarget(targetId));
+
+  const afterCol = makeAutoFrame("After");
+  afterCol.paddingTop = afterCol.paddingBottom = 0;
+  afterCol.paddingLeft = afterCol.paddingRight = 0;
+  afterCol.appendChild(await makePluginText("AFTER", { size: 11, bold: true }));
+  const root = await cloneTarget(targetId);
+  afterCol.appendChild(root);
+
+  row.appendChild(beforeCol);
+  row.appendChild(afterCol);
+  frame.appendChild(row);
+
+  await runOps(opt.ops || [], root, afterCol, styleMaps);
 
   // Mark applied only after the ops all succeeded, so a failed direction can
   // be retried after fixing the draft.

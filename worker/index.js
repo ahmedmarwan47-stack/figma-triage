@@ -2,23 +2,29 @@
 //
 // Receives Slack Events API callbacks. When Ahmed replies in the thread of a
 // "Needs your input" message (posted by the reporter with a trailing
-// `ref:cmt_<id> file:<key>` line), this worker:
-//   1. writes clarifications/<commentId>.json into the GitHub repo, and
-//   2. dispatches the triage workflow (force) so the comment is re-triaged
-//      with the clarification as context, usually promoting it to an
-//      apply-ready mechanical draft.
+// `ref:cmt_<id> file:<key>` line), the reply is routed one of two ways:
 //
-// The reply never touches Figma — it's context for Claude, not a thread post.
+//   1. DEFAULT — clarify to Claude: the reply is written to
+//      clarifications/<commentId>.json in the repo and the triage workflow is
+//      dispatched, so the comment is re-triaged with the clarification as
+//      context (usually promoting it to an apply-ready mechanical draft).
+//      Nothing is posted to Figma.
+//
+//   2. PREFIXED with "figma:" — reply in Figma: everything after the prefix
+//      is posted verbatim as a reply in the Figma comment thread (as Ahmed,
+//      via his FIGMA_TOKEN). No re-triage.
 //
 // Secrets (wrangler secret put <NAME>):
 //   SLACK_SIGNING_SECRET  Slack app → Basic Information → Signing Secret
 //   SLACK_BOT_TOKEN       Slack app → OAuth → Bot User OAuth Token (xoxb-…)
 //   GITHUB_TOKEN          fine-grained PAT: contents read/write + actions write
+//   FIGMA_TOKEN           Figma personal access token (comments: write)
 // Vars (wrangler.toml):
 //   GITHUB_REPO           e.g. "ahmedmarwan47-stack/figma-triage"
 //   GITHUB_BRANCH         e.g. "main"
 
 const REF_RE = /ref:cmt_(\S+) file:(\S+)/;
+const FIGMA_PREFIX_RE = /^\s*figma:\s*/i;
 
 export default {
   async fetch(request, env, ctx) {
@@ -70,6 +76,27 @@ async function processThreadReply(ev, env) {
     if (!m) return; // reply on some other message — not ours
 
     const [, commentId, fileKey] = m;
+
+    // Route 2: "figma:" prefix — post the reply into the Figma comment thread.
+    const figmaMatch = FIGMA_PREFIX_RE.exec(ev.text ?? "");
+    if (figmaMatch) {
+      const replyText = ev.text.slice(figmaMatch[0].length).trim();
+      if (!replyText) return;
+      await postFigmaReply(env, fileKey, commentId, replyText);
+      await slackApi(env, "reactions.add", {
+        channel: ev.channel,
+        timestamp: ev.ts,
+        name: "speech_balloon",
+      }).catch(() => {});
+      await slackApi(env, "chat.postMessage", {
+        channel: ev.channel,
+        thread_ts: ev.thread_ts,
+        text: "Posted to the Figma comment thread. (Not sent to Claude — reply without the `figma:` prefix if you also want a re-triage.)",
+      }).catch(() => {});
+      return;
+    }
+
+    // Route 1 (default): clarification context for Claude → re-triage.
     const clarification = {
       commentId,
       fileKey,
@@ -95,6 +122,26 @@ async function processThreadReply(ev, env) {
   } catch (err) {
     console.error("processThreadReply failed:", err);
   }
+}
+
+// ---- Figma ------------------------------------------------------------------
+
+// The one write Figma's REST API allows: replying in a comment thread. Posts
+// as the owner of FIGMA_TOKEN (i.e. as Ahmed) — only ever with text he typed
+// himself after the figma: prefix, never model-drafted content.
+async function postFigmaReply(env, fileKey, commentId, message) {
+  const res = await fetch(`https://api.figma.com/v1/files/${fileKey}/comments`, {
+    method: "POST",
+    headers: {
+      "X-Figma-Token": env.FIGMA_TOKEN,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ message, comment_id: commentId }),
+  });
+  if (!res.ok) {
+    throw new Error(`figma reply POST → ${res.status} ${await res.text()}`);
+  }
+  return res.json();
 }
 
 // ---- Slack ------------------------------------------------------------------

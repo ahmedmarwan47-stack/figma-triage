@@ -219,7 +219,9 @@ function formatClarificationMessage(it) {
   if (it.verdict.reply) lines.push(`💬 _Suggested thread reply:_ ${truncate(it.verdict.reply, 260)}`);
   lines.push(
     "",
-    "*Reply in this thread* to clarify — I'll re-triage the comment with your answer and draft the edit automatically. (Your reply stays here; nothing is posted to Figma.)",
+    "*Reply in this thread:*",
+    "• *Plain reply* → clarifies to Claude; the comment is re-triaged with your answer and the edit gets drafted. Nothing is posted to Figma.",
+    "• *Start with* `figma:` → everything after it is posted as your reply in the Figma comment thread (e.g. `figma: Good catch — fixing this today`).",
     `\`ref:cmt_${it.commentId} file:${it.fileKey}\``,
   );
   return lines.join("\n");

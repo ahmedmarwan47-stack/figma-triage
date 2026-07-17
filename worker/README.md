@@ -1,17 +1,19 @@
 # figma-triage worker — two-way Slack bridge
 
-Lets you **reply to a "Needs your input" message in Slack** and have the tool
-re-triage that Figma comment with your answer as context — no copy-paste, and
-nothing gets posted to the Figma thread. Your reply is context for Claude, not
-a comment.
+Lets you **reply to a "Needs your input" message in Slack** and route your
+answer one of two ways:
+
+| You type | What happens |
+|---|---|
+| `they mean the pricing CTA, make it Amber/600` | **Clarify to Claude** — the comment is re-triaged with your answer as context and the edit gets drafted. Nothing is posted to Figma. |
+| `figma: Good catch — fixing this today` | **Reply in Figma** — everything after `figma:` is posted verbatim as your reply in the actual Figma comment thread. No re-triage. |
 
 ```
 Slack thread reply
    → this worker (verifies Slack signature, finds the ref marker on the parent)
-   → commits clarifications/<commentId>.json to the repo
-   → dispatches the triage workflow (force)
-   → reporter re-triages the comment with your clarification
-   → new draft lands in the digest + the plugin (usually as a mechanical job)
+   ├─ plain reply:  commits clarifications/<commentId>.json → dispatches the
+   │                triage workflow → re-drafted job lands in digest + plugin
+   └─ figma: reply: POST /v1/files/:key/comments (comment_id=…) — posts as you
 ```
 
 ## One-time setup (~10 minutes)
@@ -41,6 +43,7 @@ wrangler login               # once
 wrangler secret put SLACK_SIGNING_SECRET
 wrangler secret put SLACK_BOT_TOKEN
 wrangler secret put GITHUB_TOKEN
+wrangler secret put FIGMA_TOKEN     # same token as the Actions secret — needs comment write
 wrangler deploy
 ```
 Copy the deployed URL (e.g. `https://figma-triage-worker.<you>.workers.dev`).
@@ -61,7 +64,13 @@ becomes its own threadable message). The old `SLACK_WEBHOOK_URL` remains as a
 fallback if the bot vars are absent.
 
 ## Daily use
-The digest arrives as before. Any "❓ Needs your input" message — just reply in
-its thread in your own words ("they mean the pricing CTA, make it Amber/600").
-The worker ✅-reacts, re-runs triage with your answer, and the re-drafted job
-shows up in the plugin a couple of minutes later.
+The digest arrives as before. Any "❓ Needs your input" message — reply in its
+thread:
+
+- **Plain reply** ("they mean the pricing CTA, make it Amber/600") → the worker
+  ✅-reacts, re-runs triage with your answer, and the re-drafted job shows up
+  in the plugin a couple of minutes later.
+- **`figma:` reply** ("figma: Did you mean the hero or the footer CTA?") → the
+  worker 💬-reacts and your text appears as a reply in the Figma comment
+  thread, posted as you. Only text you typed is ever posted — drafts are never
+  auto-sent.

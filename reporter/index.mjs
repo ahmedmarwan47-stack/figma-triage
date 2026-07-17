@@ -129,12 +129,18 @@ const HEADINGS = {
   not_for_ahmed: "🙈 Not for you — flagged and skipped",
 };
 
-// Compact digest: one line per comment, grouped by file. Full details
-// (rationales, ops, AI prompts, screenshots) live in the plugin and the jobs
-// file — the digest is a scannable index, not the record. Clarifications get
-// their own threadable messages in bot mode; in webhook-only mode their draft
-// replies are inlined here (there's nowhere else for them).
-function formatDigest({ date, buckets, filesScanned, clarificationsInline }) {
+// Compact digest as Block Kit: one section block per comment (grouped by
+// file), each carrying the node screenshot as a small right-side thumbnail —
+// enough to verify the draft targeted the right node without unfurled
+// full-size images. Full details (rationales, ops, AI prompts) live in the
+// plugin and the jobs file — the digest is a scannable index, not the record.
+// Clarifications get their own threadable messages in bot mode; in
+// webhook-only mode their draft replies are inlined here.
+function mrkdwnSection(text) {
+  return { type: "section", text: { type: "mrkdwn", text } };
+}
+
+function formatDigest({ date, buckets, clarificationsInline }) {
   const mech = buckets.mechanical.length;
   const crea = buckets.creative.length;
   const clar = buckets.clarification.length;
@@ -145,9 +151,11 @@ function formatDigest({ date, buckets, filesScanned, clarificationsInline }) {
   if (crea) counts.push(`${crea} direction set${crea > 1 ? "s" : ""}`);
   if (clar) counts.push(`${clar} need${clar === 1 ? "s" : ""} input`);
   if (skip) counts.push(`${skip} skipped`);
-  const lines = [`*Figma triage — ${date}* · ${counts.join(" · ") || "nothing new"}`];
+  const header = `*Figma triage — ${date}* · ${counts.join(" · ") || "nothing new"}`;
 
-  // Group actionable items by file, one line each.
+  const blocks = [mrkdwnSection(header)];
+
+  // Group actionable items by file, one block each.
   const byFile = new Map();
   for (const cat of ["mechanical", "creative", "clarification"]) {
     for (const it of buckets[cat]) {
@@ -158,34 +166,69 @@ function formatDigest({ date, buckets, filesScanned, clarificationsInline }) {
   }
 
   for (const [fileName, items] of byFile) {
-    lines.push("", `*${fileName}*`);
+    blocks.push({
+      type: "context",
+      elements: [{ type: "mrkdwn", text: `*${fileName}*` }],
+    });
     for (const { cat, it } of items) {
+      let line;
       if (cat === "mechanical") {
         const label = it.verdict.job?.title || truncate(it.commentText, 80);
-        lines.push(`⚙️ <${it.link}|${truncate(label, 90)}>`);
+        line = `⚙️ <${it.link}|${truncate(label, 90)}>`;
       } else if (cat === "creative") {
         const n = (it.verdict.options ?? []).length;
-        lines.push(
-          `🎨 <${it.link}|${truncate(it.commentText, 80)}> — ${n} direction${n === 1 ? "" : "s"} in the plugin`,
-        );
+        line = `🎨 <${it.link}|${truncate(it.commentText, 80)}> — ${n} direction${n === 1 ? "" : "s"} in the plugin`;
       } else {
-        lines.push(`❓ <${it.link}|${truncate(it.commentText, 80)}>`);
+        line = `❓ <${it.link}|${truncate(it.commentText, 80)}>`;
         if (clarificationsInline && it.verdict.reply) {
-          lines.push(`    💬 _draft reply:_ ${truncate(it.verdict.reply, 200)}`);
+          line += `\n💬 _draft reply:_ ${truncate(it.verdict.reply, 200)}`;
         }
       }
+      const block = mrkdwnSection(line);
+      if (it.imageUrl) {
+        block.accessory = {
+          type: "image",
+          image_url: it.imageUrl,
+          alt_text: "commented node preview",
+        };
+      }
+      blocks.push(block);
     }
   }
 
-  if (mech + crea > 0 || clar > 0) {
-    const clarNote = clarificationsInline
-      ? ""
-      : clar > 0
+  if (mech + crea + clar > 0) {
+    const clarNote =
+      !clarificationsInline && clar > 0
         ? " ❓ items follow as separate messages — reply in their threads."
         : "";
-    lines.push("", `_⚙️ + 🎨 are apply-ready in the *Claude Comments* plugin.${clarNote}_`);
+    blocks.push({
+      type: "context",
+      elements: [
+        {
+          type: "mrkdwn",
+          text: `⚙️ + 🎨 are apply-ready in the *Claude Comments* plugin.${clarNote}`,
+        },
+      ],
+    });
   }
-  return lines.join("\n");
+
+  // `text` is the notification-preview fallback; blocks are the rendered body.
+  return { text: header.replace(/\*/g, ""), blocks };
+}
+
+// Slack caps a message at 50 blocks — chunk busy days into several messages.
+async function sendDigest({ botMode, botToken, channelId, payload }) {
+  const parts =
+    typeof payload === "string" || (payload.blocks?.length ?? 0) <= 48
+      ? [payload]
+      : Array.from({ length: Math.ceil(payload.blocks.length / 48) }, (_, i) => ({
+          text: payload.text,
+          blocks: payload.blocks.slice(i * 48, i * 48 + 48),
+        }));
+  for (const part of parts) {
+    if (botMode) await postSlackBot(botToken, channelId, part);
+    else await postSlack(process.env.SLACK_WEBHOOK_URL, part);
+  }
 }
 
 // One standalone Slack message per needs-clarification comment. The trailing
@@ -475,25 +518,22 @@ async function main() {
   const channelId = process.env.SLACK_CHANNEL_ID;
   const botMode = !!(botToken && channelId);
 
-  const digestText =
+  const digestPayload =
     totalActionable === 0 && buckets.not_for_ahmed.length === 0
       ? `*Figma triage — ${today}*\nNo new mentions today.`
       : formatDigest({
           date: today,
           buckets,
-          filesScanned: files.length,
           clarificationsInline: !botMode,
         });
+  await sendDigest({ botMode, botToken, channelId, payload: digestPayload });
   if (botMode) {
-    // Bot transport: digest first, then each clarification as its OWN message
-    // carrying a ref marker. A thread reply on that message is routed back to
-    // the matching Figma comment by worker/ and consumed on the next run.
-    await postSlackBot(botToken, channelId, digestText);
+    // Each clarification gets its OWN message carrying a ref marker. A thread
+    // reply on that message is routed back to the matching Figma comment by
+    // worker/ and consumed on the next run.
     for (const it of buckets.clarification) {
       await postSlackBot(botToken, channelId, formatClarificationMessage(it));
     }
-  } else {
-    await postSlack(process.env.SLACK_WEBHOOK_URL, digestText);
   }
 
   // Full triage record (all categories, including the drafts that don't become

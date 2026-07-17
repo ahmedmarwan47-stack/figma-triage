@@ -126,13 +126,22 @@
           j.options.forEach((opt, oi) => {
             const row = document.createElement("div");
             row.className = "optionrow";
+            const hasOps = Array.isArray(opt.ops) && opt.ops.length;
             row.innerHTML = `
               <div class="optbody">
                 <div class="optlabel">${escapeHtml(opt.label || `Option ${oi + 1}`)}</div>
                 <div class="optcaption">${escapeHtml(opt.caption || "")}</div>
               </div>
-              <button ${Array.isArray(opt.ops) && opt.ops.length ? "" : "disabled title='No drafted ops — use the AI prompt in Slack'"}>Apply</button>`;
-            row.querySelector("button").onclick = () => {
+              ${opt.aiPrompt ? `<button class="secondary copyai" title="Copy this direction's Figma AI prompt to paste into Figma's AI">Prompt</button>` : ""}
+              <button class="applybtn" ${hasOps ? "" : "disabled title='No drafted ops — use the AI prompt instead'"}>Apply</button>`;
+            const copyBtn = row.querySelector(".copyai");
+            if (copyBtn) {
+              copyBtn.onclick = () => {
+                copyText(opt.aiPrompt);
+                setStatus("AI prompt copied — paste into Figma's AI.");
+              };
+            }
+            row.querySelector(".applybtn").onclick = () => {
               post({ type: "apply", job: j, optionIndex: oi });
               setStatus("Applying direction: " + (opt.label || oi + 1));
             };
@@ -179,6 +188,17 @@
 
   function escapeHtml(s) {
     return (s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  }
+
+  // Clipboard inside a plugin iframe: navigator.clipboard is often blocked,
+  // so use the textarea + execCommand fallback that Figma supports.
+  function copyText(t) {
+    const ta = document.createElement("textarea");
+    ta.value = t || "";
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    ta.remove();
   }
 
   onmessage = (e) => {

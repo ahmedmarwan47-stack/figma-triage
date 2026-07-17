@@ -180,11 +180,11 @@ function buildUserPrompt({ fileName, comment, node, thread, localStyles }) {
   const hasStyles = (localStyles?.paint?.length ?? 0) + (localStyles?.text?.length ?? 0) > 0;
 
   const stylesBlock = hasStyles
-    ? `LOCAL PAINT STYLES (the ONLY valid values for setFillStyle "styleName" and setTextStyle "colorStyleName" — if the perfect one isn't here, pick the CLOSEST match by family/number, never invent):
+    ? `KNOWN LOCAL PAINT STYLES (styles we could detect in use — the file may contain MORE that aren't listed, e.g. a light-mode style unused in a dark design). Prefer these names for setFillStyle "styleName" / setTextStyle "colorStyleName". If the comment explicitly names a style (e.g. "the Tone/50 style"), USE THAT NAME even if it's not below — the plugin will resolve it against the file's full style set:
 ${paintList}
-LOCAL TEXT STYLES (the ONLY valid values for setTextStyle "textStyleName" — omit textStyleName entirely if none of these fit):
+KNOWN LOCAL TEXT STYLES (same caveat) for setTextStyle "textStyleName":
 ${textList}`
-    : `LOCAL PAINT / TEXT STYLES: (none fetched — pick names cautiously from Ahmed's principles, and prefer to omit style-driven ops if unsure)`;
+    : `LOCAL STYLES: none detected via REST (this does NOT mean the file has none — REST only sees styles currently in use). If the comment names a style explicitly, use that exact name; otherwise follow Ahmed's family conventions (Tone/50–900, Navy/50–900, etc.).`;
 
   return `FILE: ${fileName}
 COMMENT (${comment.user?.handle ?? "someone"}): ${comment.message}
@@ -242,52 +242,42 @@ function callClaude(userPrompt) {
   });
 }
 
-// Belt-and-braces guard: if Claude still names a style that isn't in the file
-// (rare with the tightened prompt, but possible), strip the offending field
-// rather than emit a job that will throw at apply time. The plugin's ops treat
-// missing fields as no-ops. Runs over the mechanical job's ops AND each
-// creative option's ops.
-function sanitizeOps(ops, paint, text, dropped) {
-  const kept = [];
+// NON-destructive style check. IMPORTANT: the reporter's style list is
+// inherently INCOMPLETE — REST only surfaces styles currently *used* in the
+// file, so a style that exists in the library but is applied nowhere (e.g. a
+// light-mode "Tone/50" in an all-dark design) is invisible to us. Stripping
+// ops against this partial list deletes VALID work (it once gutted a
+// clarified light-mode job down to a bare duplicateTarget). The PLUGIN holds
+// the authoritative list (getLocalPaintStylesAsync) and already throws a
+// clean "no local paint style X" at apply time. So here we only WARN about
+// names we can't confirm — we never remove or null a field.
+function warnUnknownStyles(ops, paint, text, unknown) {
   for (const op of ops) {
     if (op.op === "setFillStyle" && op.styleName && paint.size && !paint.has(op.styleName)) {
-      dropped.push(`setFillStyle→"${op.styleName}"`);
-      continue;
+      unknown.add(op.styleName);
     }
     if (op.op === "setTextStyle") {
-      if (op.textStyleName && text.size && !text.has(op.textStyleName)) {
-        dropped.push(`textStyle→"${op.textStyleName}"`);
-        op.textStyleName = null;
-      }
-      if (op.colorStyleName && paint.size && !paint.has(op.colorStyleName)) {
-        dropped.push(`colorStyle→"${op.colorStyleName}"`);
-        op.colorStyleName = null;
-      }
-      if (!op.textStyleName && !op.colorStyleName) continue;
+      if (op.textStyleName && text.size && !text.has(op.textStyleName)) unknown.add(op.textStyleName);
+      if (op.colorStyleName && paint.size && !paint.has(op.colorStyleName)) unknown.add(op.colorStyleName);
     }
-    kept.push(op);
   }
-  return kept;
 }
 
 function sanitizeAgainstStyles(verdict, localStyles) {
   if (!verdict || !localStyles) return verdict;
   const paint = new Set(localStyles.paint ?? []);
   const text = new Set(localStyles.text ?? []);
-  const dropped = [];
-  if (verdict.job?.ops) {
-    verdict.job.ops = sanitizeOps(verdict.job.ops, paint, text, dropped);
-  }
+  const unknown = new Set();
+  if (verdict.job?.ops) warnUnknownStyles(verdict.job.ops, paint, text, unknown);
   for (const opt of verdict.options ?? []) {
-    if (Array.isArray(opt.ops)) {
-      opt.ops = sanitizeOps(opt.ops, paint, text, dropped);
-    }
+    if (Array.isArray(opt.ops)) warnUnknownStyles(opt.ops, paint, text, unknown);
   }
-  if (dropped.length) {
-    console.warn(`[llm] dropped ops referencing missing styles: ${dropped.join(", ")}`);
-    if (verdict.rationale) {
-      verdict.rationale += ` (dropped ops for missing local styles: ${dropped.join(", ")})`;
-    }
+  if (unknown.size) {
+    // Not an error — these may well be real styles we simply couldn't see via
+    // REST. The plugin validates for real at apply time.
+    console.warn(
+      `[llm] style names not in the (partial) discovered set — plugin will validate: ${[...unknown].join(", ")}`,
+    );
   }
   return verdict;
 }

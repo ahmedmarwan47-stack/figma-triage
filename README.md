@@ -1,75 +1,83 @@
 # Figma comment triage
 
-An external, self-firing version of the daily Figma comment triage — no Claude Code session required.
+An external, self-firing Figma comment triage — no Claude Code session required for the daily runs.
 
-Every weekday at **14:00 Africa/Cairo** a cloud job:
-
-1. **discovers** new unresolved Figma comments that mention you,
-2. **classifies + drafts** each one with Claude (mechanical / creative / clarification / not-for-you),
-3. posts a **Slack digest**, and
-4. publishes **apply-ready jobs** that a companion **Figma plugin** turns into real edits on a `Claude Comments` page when you click Apply.
+Every weekday at **14:00 Africa/Cairo** a cloud job discovers new unresolved Figma comments, classifies + drafts a response to each with Claude, posts a **Slack digest**, and publishes **apply-ready jobs** that a companion **Figma plugin** executes on a `Claude Comments` page with one click per edit. Ambiguous comments become two-way Slack threads: reply in Slack to either clarify to Claude (re-triage) or post your reply into the Figma thread.
 
 ```
-reporter/  ── GitHub Action, cron @ 14:00 Cairo (weekdays)
-   discover (Figma REST) → classify+draft (Claude API) → Slack digest → jobs/latest.json
-plugin/    ── Figma plugin, installed once
-   fetches jobs/latest.json → applies drafted edits on a "Claude Comments" page
+reporter/        GitHub Action, cron @ 14:00 Cairo (weekdays), also workflow_dispatch (force)
+   discover (Figma REST) → classify+draft (claude CLI) → Slack digest → jobs/latest.json
+plugin/          Figma plugin "Claude Comments", installed once, confirm-then-apply
+   fetches jobs/latest.json → Apply buttons execute drafted ops on a "Claude Comments" page
+worker/          Cloudflare Worker (two-way Slack bridge)  ⚠️ NOT YET DEPLOYED — see Status
+   Slack thread reply → clarifications/<id>.json + re-triage  |  "figma:" prefix → posts reply in Figma thread
+clarifications/  written by worker, consumed + deleted by reporter
+jobs/            per-day triage output + latest.json (the plugin's feed)
 ```
 
 ## Why it's split this way
+Figma has **no REST API for creating design content** — an unattended job physically cannot draw into a file. So the cloud job only *drafts*; the plugin (running inside Figma, where the Plugin API can write) *applies*. The only REST write that exists is posting a comment reply — used exclusively for text the user typed themself (the `figma:` route), never for model-drafted content.
 
-Figma has **no REST API for creating design content** — an unattended job physically cannot draw into your file. So the cloud job only *drafts*; the plugin (which runs inside Figma, where the Plugin API can write) *applies*. Posting a **comment reply** is possible via REST, but that is never done automatically — replies are drafted into the digest and you post them yourself (or via the gated `reporter/reply-figma.mjs`).
+## How comments are classified
+Claude triages each unresolved comment into exactly one category (prompt in `reporter/llm.mjs`; biased toward mechanical — quoted text is authoritative, no second-guessing user wording):
 
-## One-time setup
+- **mechanical** — clear action + clear target → a job of declarative ops, one Apply in the plugin.
+- **creative** — needs visual judgment → 2–3 direction options, **each compiled to its own op list** (10–40 ops for a recolor is normal) with its own Apply button; each lands on its own labeled clone for side-by-side comparison. An `aiPrompt` for Figma's native AI ships as an *alternative* route, and is the only route when ops can't express the direction (option ships `ops: []`).
+- **clarification** — truly ambiguous → posted to Slack as its own threadable "❓ Needs your input" message (bot transport only). Reply plain to clarify to Claude → auto re-triage; reply `figma: <text>` to post `<text>` into the Figma comment thread.
+- **not_for_ahmed** — flagged and skipped.
 
-### 1. Put this in a GitHub repo
-The repo can be **public** — it holds no secrets (those live in Actions secrets). The plugin fetches `jobs/latest.json` from the repo's raw URL.
+## Op vocabulary (MUST stay in sync in two places)
+Prompt in `reporter/llm.mjs` (what Claude may emit) ↔ interpreter in `plugin/code.js` (`runOps`, what executes):
+`duplicateTarget`, `setText`, `setFillStyle`, `setFillColor` (hex fallback when no local style fits), `setTextStyle` (textStyleName / colorStyleName independently optional), `removeNode`, `cloneNode`.
+Add any new op to **both** files.
 
-### 2. Fill in `config.json`
-- `figma.teamIds` — team IDs (the number in `figma.com/files/team/<ID>/…`); auto-discovers every file in the team. **or**
-- `figma.fileKeys` — specific file keys (`figma.com/design/<KEY>/…`). Seeded with the El Alsson case-study file.
-- `jobsBaseRawUrl` — replace `OWNER/REPO` with yours, e.g. `https://raw.githubusercontent.com/ahmed/figma-triage/main/jobs`.
+## Context Claude gets per comment (all in `reporter/llm.mjs` + `index.mjs`)
+- Text-layer inventory of the commented node, **sorted by distance to the comment pin** (computed from `client_meta.node_offset` + bounding boxes) with each layer's ancestor chain (`inside: "Hero Form"(FRAME) → "Button"(FRAME)`) so container fills target the frame, not the label text.
+- Local paint/text style names — file-level plus **node-scoped styles from the nodes endpoint** (the only REST source that surfaces unpublished local styles; `/v1/files/:key/styles` lists published only, and the file-level `styles` map is truncated by `?depth`). A sanitizer strips any op referencing a nonexistent style before publishing.
+- Thread replies, plus any consumed Slack clarification as a pseudo-reply.
+- Slack screenshots use the **smallest frame containing the pin** (`pickImageNode`), not the whole page.
 
-### 3. Add three GitHub Actions secrets
-Repo → Settings → Secrets and variables → Actions → New repository secret:
-- `FIGMA_TOKEN` — Figma → Settings → Security → Personal access tokens.
-- `CLAUDE_CODE_OAUTH_TOKEN` — run `claude setup-token` locally (needs Claude Code + a Pro/Max subscription); this draws on your **subscription usage**, not a metered API key.
-- `SLACK_WEBHOOK_URL` — see next step.
+## Plugin behavior (`plugin/`)
+- Confirm-then-apply only. No polling, no auto-apply (deliberately removed).
+- One container clone **per target node** — multiple mechanical comments on the same frame stack into one clone; per-comment idempotency via plugin-data (`Already applied` toast on re-click). Apply calls are **serialized through a queue** (concurrent applies used to race and duplicate containers).
+- Creative: one Apply per direction, dedup per comment+option.
+- "Apply all" = mechanicals only.
+- Cross-file inbox: "Other files with pending drafts" panel lists other files' draft counts with open links.
+- After editing plugin files, **re-import** in Figma (Plugins → Development → Import plugin from manifest…).
 
-> The classify/draft step runs the `claude` CLI headlessly (installed in the workflow). No `ANTHROPIC_API_KEY` / separate API billing.
+## Reliability measures (hard-won, don't remove)
+- `claude` CLI: `/dev/null` stdin (hangs on non-TTY pipe otherwise), 3 attempts with backoff (transient exit-1 with empty stderr happens in CI).
+- Figma REST: 429s retried honoring `Retry-After` (image renders trip rate limits routinely).
+- Workflow: cron fires 11:00 + 12:00 UTC to bracket Cairo DST; a local-hour guard in `index.mjs` runs the work exactly once. `git pull --rebase` before push (worker clarification commits can land mid-run).
 
-### 4. Slack incoming webhook
-Create a private channel (e.g. `#figma-triage`), add the **Incoming Webhooks** app to it, copy the webhook URL → that's `SLACK_WEBHOOK_URL`. No scopes to manage.
+## Secrets (repo → Settings → Secrets and variables → Actions)
+- `FIGMA_TOKEN` — Figma PAT (expires! a run failing with `403 Token expired` means re-mint + update).
+- `CLAUDE_CODE_OAUTH_TOKEN` — from `claude setup-token`; draws on the Claude subscription, no metered API.
+- `SLACK_WEBHOOK_URL` — legacy one-way transport (fallback).
+- `SLACK_BOT_TOKEN` + `SLACK_CHANNEL_ID` — bot transport; **required** for the clarification loop. ⚠️ Not yet added (see Status).
 
-### 5. Install the Figma plugin (once)
-Figma desktop → menu → **Plugins → Development → Import plugin from manifest…** → pick `plugin/manifest.json`. It now lives in your plugins menu permanently. First run: paste your `jobsBaseRawUrl` into the plugin's field (it's remembered).
+## Status as of 2026-07-17 (pause point)
+**Working and verified end-to-end:** daily discovery → classification → digest (webhook transport) → plugin applies for mechanical AND creative directions; spatial pin targeting; style-aware ops; clarification messages formatted (bot transport code in place).
 
-## Daily flow
-1. The Action runs at 14:00 Cairo, posts the digest to Slack, commits `jobs/<date>.json` + `jobs/latest.json`.
-2. Open the file in Figma → run **Claude Comments** → it auto-loads today's drafts for that file → **Apply all** (or per-card Apply). ~10 seconds.
-3. For clarification comments, copy the drafted reply from Slack into the thread yourself.
+**Pending — the worker is written but NOT deployed** (`worker/index.js` complete, syntax-checked; Ahmed will deploy from his Mac):
+1. `cd worker && wrangler login && wrangler deploy`, then `wrangler secret put` × 4: `SLACK_SIGNING_SECRET`, `SLACK_BOT_TOKEN`, `GITHUB_TOKEN` (fine-grained PAT: Contents r/w + Actions r/w), `FIGMA_TOKEN`. Values exist in the Slack app config / token pages; the ones shared in the 2026-07-17 session transcript should be **rotated after deploy**.
+2. Slack app (already created, scopes `chat:write`, `channels:history`, `groups:history`, `reactions:write` + needs **`im:history`** since the chosen channel `D…` is the app DM): enable App Home **Messages Tab**, then Event Subscriptions → Request URL `https://<worker-url>/slack/events` → bot event **`message.im`** → Save.
+3. Add repo secrets `SLACK_BOT_TOKEN` and `SLACK_CHANNEL_ID` (the D… id).
+4. Test: dispatch the workflow with force, reply to a "❓ Needs your input" thread both ways.
 
-## Run it locally
-```bash
-cd figma-triage
-FORCE_RUN=1 FIGMA_TOKEN=… SLACK_WEBHOOK_URL=… npm run triage
-```
-Locally the `claude` CLI uses your logged-in session, so no token env var is needed (just be logged into Claude Code). `FORCE_RUN=1` bypasses the 2pm-Cairo and already-ran-today guards. Without `SLACK_WEBHOOK_URL` the digest prints to stdout.
+**Also outstanding:**
+- `config.json` → `figma.includeAllUnresolved` is still `true` (test mode). Flip to `false` for mention-only triage.
+- Annotations: no REST endpoint exists (`/v1/files/:key/annotations` → 404, verified). If wanted, the path is plugin-side reading of `figma.annotations` POSTed to the worker.
+- Possible next upgrades discussed: Figma `FILE_COMMENT` webhooks into the worker for near-real-time triage (needs paid team plan); batching all comments into one claude call per run (token efficiency).
 
-Trigger the cloud job on demand: Actions → **Figma comment triage** → Run workflow → tick *force*.
+## For the next Claude Code session
+- **Branches:** development happened on `claude/tool-dev-markdown-files-f1716j`, fast-forwarded into `main` after each verified run. `main` is the source of truth; the plugin fetches `jobs/latest.json` from `main`'s raw URL.
+- **Trigger a run:** Actions → "Figma comment triage" → Run workflow → force. To re-scan already-processed comments first reset `reporter/state.json` to `{ "lastRunAt": null, "lastRunDate": null }` (the run commits new state + jobs back — pull before continuing).
+- **Local run:** `FORCE_RUN=1 FIGMA_TOKEN=… npm run triage` (prints digest to stdout without Slack vars).
+- **Plugin changes** must be re-imported by Ahmed in Figma desktop — send him `plugin/code.js` / `ui.html` after edits.
+- The user is Ahmed, a freelance web/UI designer (design principles are embedded in the `llm.mjs` system prompt: auto layout everywhere, styles by name never hex, 12px floor, first-person past-tense voice, banned buzzwords).
 
-## Post a drafted reply (gated, manual)
+## Post a drafted reply manually (gated)
 ```bash
 FIGMA_TOKEN=… node reporter/reply-figma.mjs <fileKey> <commentId> "your reviewed reply"
 ```
-
-## Extending what the plugin can apply
-The op vocabulary is defined in **two places that must stay in sync**: the prompt in `reporter/llm.mjs` (what Claude may emit) and the interpreter in `plugin/code.js` (what actually runs). Current ops: `duplicateTarget`, `setText`, `setFillStyle`, `setFillColor` (hex fallback), `setTextStyle`, `removeNode`, `cloneNode`. Add a new op to both.
-
-Creative comments are compiled into the same vocabulary: each drafted direction option carries its own op list, applied per-option from the plugin (one clone per direction, side by side). Directions that ops can't express ship an `aiPrompt` for Figma's native AI instead.
-
-## Two-way Slack (optional)
-Deploy `worker/` (Cloudflare Worker — see `worker/README.md`) and set `SLACK_BOT_TOKEN` + `SLACK_CHANNEL_ID` secrets to unlock the clarification loop: reply to a "❓ Needs your input" message in its Slack thread, and the comment is automatically re-triaged with your answer as context — usually promoting it to an apply-ready mechanical draft. Your reply is context for Claude only; it is never posted to the Figma thread.
-
-## DST note
-GitHub cron is UTC-only, so the workflow fires at both 11:00 and 12:00 UTC (bracketing Cairo's summer/winter offset) and the reporter's local-hour guard runs the work exactly once, at 14:00 Cairo.

@@ -56,6 +56,43 @@ Add any new op to **both** files.
 - `SLACK_WEBHOOK_URL` — legacy one-way transport (fallback).
 - `SLACK_BOT_TOKEN` + `SLACK_CHANNEL_ID` — bot transport; **required** for the clarification loop. ⚠️ Not yet added (see Status).
 
+## Test findings 2026-07-17 (READ FIRST next session)
+
+Ahmed added a new comment set to the Wellth file (which **has real local text
++ color styles**) to test style-awareness. That run (`27ba575`) exposed two things:
+
+1. **Every LLM call failed** — `claude exited 1` (empty stderr) on all 8
+   comments, all retries. Almost certainly the Claude **subscription hit a
+   rate/usage limit** after ~16 heavy test runs that day (or a transient
+   outage). All 8 degraded to the error-fallback "clarification", and the run
+   **overwrote the good jobs file with garbage + advanced state.** That data
+   loss is now prevented (see below) but the run itself proves nothing about
+   styles — **re-run first thing next session when the limit has reset.**
+
+   Mitigation shipped: `classifyAndDraft` marks the fallback `_autoFailed`, and
+   `main()` now **aborts (exit 1, no write, no state advance) if every
+   processed comment auto-failed** — a Claude outage can no longer clobber the
+   record. Partial failures still publish the ones that succeeded. The good
+   jobs data was restored from `main` and `state.json` rewound to 2026-07-15 so
+   the next run reprocesses the new comments.
+
+2. **Style discovery STILL logs `0 paint, 0 text`** at file level even though
+   Wellth has styles. Root cause understood: `/v1/files/:key/styles` lists
+   only *published* styles (Wellth's are local/unpublished → 0), and
+   `/v1/files/:key?depth=1` truncates the document so its top-level `styles`
+   map is empty. The **node-scoped path** (`getNode` → per-subtree `styles`
+   map, merged into `threadStyles` in `index.mjs`) is the reliable source and
+   is wired in — but it was never verified because every LLM call died. New
+   logging (`[figma] node <id> styles: N paint, M text → …available to Claude`)
+   will confirm it on the next successful run. **If node-scoped still returns
+   0**, the fallback is to fetch the file at full depth (large but correct) or
+   read the `styles` map from the already-fetched node subtree document.
+
+**First action next session:** reset `state.json` (already done → 2026-07-15),
+dispatch the workflow with force, and check the log for the new
+`[figma] node … styles` line + whether mechanical/creative drafts reference
+Wellth's real style names. Then continue the complex-comment testing.
+
 ## Status as of 2026-07-17 (pause point)
 **Working and verified end-to-end:** daily discovery → classification → digest (webhook transport) → plugin applies for mechanical AND creative directions; spatial pin targeting; style-aware ops; clarification messages formatted (bot transport code in place).
 

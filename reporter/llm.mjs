@@ -321,12 +321,16 @@ export async function classifyAndDraft(input) {
     return sanitizeAgainstStyles(verdict, input.localStyles);
   } catch (err) {
     // Never crash the whole run on one bad call — degrade to a clarification.
+    // `_autoFailed` lets the reporter detect a total-outage run (every call
+    // failing, e.g. a Claude rate-limit/outage) and refuse to overwrite the
+    // good jobs file or advance state with garbage.
     return {
       category: "clarification",
       rationale: `Auto-triage failed for this one (${err.message}).`,
       job: null,
       options: null,
       reply: "I couldn't auto-triage this one — flagging it for a manual look.",
+      _autoFailed: true,
     };
   }
 }

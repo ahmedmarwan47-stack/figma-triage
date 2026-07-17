@@ -366,6 +366,8 @@ async function main() {
     not_for_ahmed: [],
   };
   const jobs = [];
+  let processed = 0;
+  let autoFailed = 0; // classifications that fell to the error fallback
 
   // Slack thread replies routed back by the worker — force those comments
   // through re-triage with the reply as context, even if "old".
@@ -437,6 +439,11 @@ async function main() {
           // pin — that's the section the reviewer actually needs to see.
           const imageNodeId = pickImageNode(node, thread.head) || nodeId;
           imageUrl = await getNodeImage(token, file.key, imageNodeId);
+          if (nodeData.styles.paint.length || nodeData.styles.text.length) {
+            console.log(
+              `[figma] node ${nodeId} styles: ${nodeData.styles.paint.length} paint, ${nodeData.styles.text.length} text → ${threadStyles.paint.length}/${threadStyles.text.length} available to Claude`,
+            );
+          }
         } catch (err) {
           console.warn(`[warn] node ${nodeId} in ${file.key}: ${err.message}`);
         }
@@ -464,6 +471,9 @@ async function main() {
         thread: replies,
         localStyles: threadStyles,
       });
+
+      processed++;
+      if (verdict._autoFailed) autoFailed++;
 
       // Clarification consumed — remove the file (the workflow commits the
       // deletion) so the next run doesn't re-process it.
@@ -507,6 +517,23 @@ async function main() {
         });
       }
     }
+  }
+
+  // Total-outage guard: if we processed comments and EVERY one fell to the
+  // error fallback (e.g. a Claude rate-limit/outage made all CLI calls exit 1),
+  // do NOT overwrite the good jobs file or advance state with garbage. Bail so
+  // a later run reprocesses cleanly. A partial failure (some succeeded) still
+  // publishes — those are real.
+  if (processed > 0 && autoFailed === processed) {
+    console.error(
+      `[abort] all ${processed} classification(s) failed (likely a Claude outage/rate-limit). ` +
+        `Leaving jobs + state untouched so a later run retries.`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+  if (autoFailed > 0) {
+    console.warn(`[warn] ${autoFailed}/${processed} classification(s) auto-failed and degraded to clarification.`);
   }
 
   const totalActionable =

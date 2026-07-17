@@ -56,42 +56,48 @@ Add any new op to **both** files.
 - `SLACK_WEBHOOK_URL` — legacy one-way transport (fallback).
 - `SLACK_BOT_TOKEN` + `SLACK_CHANNEL_ID` — bot transport; **required** for the clarification loop. ⚠️ Not yet added (see Status).
 
-## Test findings 2026-07-17 (READ FIRST next session)
+## Test findings 2026-07-17/18 (READ FIRST next session)
 
-Ahmed added a new comment set to the Wellth file (which **has real local text
-+ color styles**) to test style-awareness. That run (`27ba575`) exposed two things:
+Tested 8 genuinely complex comments on the Wellth file (which **has real local
+styles**). Run `1a007e6` is the clean result. What we learned:
 
-1. **Every LLM call failed** — `claude exited 1` (empty stderr) on all 8
-   comments, all retries. Almost certainly the Claude **subscription hit a
-   rate/usage limit** after ~16 heavy test runs that day (or a transient
-   outage). All 8 degraded to the error-fallback "clarification", and the run
-   **overwrote the good jobs file with garbage + advanced state.** That data
-   loss is now prevented (see below) but the run itself proves nothing about
-   styles — **re-run first thing next session when the limit has reset.**
+**What works well ✅**
+- **Node-scoped style discovery works.** File-level fetch still logs
+  `0 paint, 0 text` (Wellth's styles are unpublished + `?depth=1` truncates the
+  doc), but the per-node path surfaces them: `[figma] node 40:723 styles: 1
+  paint, 0 text → 1/0 available to Claude`. Claude sees the styles used in the
+  commented subtree — which is what it needs. **Leave the file-level 0/0 log
+  alone; it's expected and harmless.**
+- **Light-mode creative compiled to 21 real ops** (+10, +11 for the other two
+  directions) — the plugin-executable creative path holds up on a full recolor.
+- **Honest degradation, not hallucination.** "black gradient overlay should
+  follow the same style as the section below" → clarification (couldn't find a
+  gradient node or identify "section below"). "add a statement 'Mountain View
+  Hospitality'" → clean mechanical duplicate+setText. The classifier reasons
+  about targets it can/can't resolve instead of faking edits.
 
-   Mitigation shipped: `classifyAndDraft` marks the fallback `_autoFailed`, and
-   `main()` now **aborts (exit 1, no write, no state advance) if every
-   processed comment auto-failed** — a Claude outage can no longer clobber the
-   record. Partial failures still publish the ones that succeeded. The good
-   jobs data was restored from `main` and `state.json` rewound to 2026-07-15 so
-   the next run reprocesses the new comments.
+**Concrete gaps found (next-session work) ⚠️**
+1. **No resize/scale op.** "I need the photos a little bit bigger" is
+   mechanical in spirit but degraded to clarification because the op vocabulary
+   can't resize a node. **Add a `resize`/`scale` op to BOTH `reporter/llm.mjs`
+   (prompt) and `plugin/code.js` (`runOps`)** — highest-value gap.
+2. **Layout/creation directions produce 0 ops** (gallery-of-photos,
+   photo-layout, button-repositioning). These need creating/duplicating/moving
+   nodes that the current ops can't express, so they fall back to aiPrompt
+   (correct, but not one-click). A `duplicateInto`/`appendClone`/reflow op set
+   would make some of these applyable; others genuinely need Figma AI.
+3. **Reliability guard shipped and untested-in-anger.** A total-LLM-outage run
+   earlier (`27ba575`, Claude subscription rate-limit after ~16 heavy runs that
+   day) had overwritten the good jobs file with 8 garbage clarifications.
+   `main()` now **aborts (exit 1, no write, no state advance) when every
+   processed comment auto-failed** (`verdict._autoFailed`); partial failures
+   still publish. If you hammer it again and hit the rate limit, expect a red
+   run that leaves data intact — that's correct.
 
-2. **Style discovery STILL logs `0 paint, 0 text`** at file level even though
-   Wellth has styles. Root cause understood: `/v1/files/:key/styles` lists
-   only *published* styles (Wellth's are local/unpublished → 0), and
-   `/v1/files/:key?depth=1` truncates the document so its top-level `styles`
-   map is empty. The **node-scoped path** (`getNode` → per-subtree `styles`
-   map, merged into `threadStyles` in `index.mjs`) is the reliable source and
-   is wired in — but it was never verified because every LLM call died. New
-   logging (`[figma] node <id> styles: N paint, M text → …available to Claude`)
-   will confirm it on the next successful run. **If node-scoped still returns
-   0**, the fallback is to fetch the file at full depth (large but correct) or
-   read the `styles` map from the already-fetched node subtree document.
-
-**First action next session:** reset `state.json` (already done → 2026-07-15),
-dispatch the workflow with force, and check the log for the new
-`[figma] node … styles` line + whether mechanical/creative drafts reference
-Wellth's real style names. Then continue the complex-comment testing.
+**Process gotcha for the operator:** a rebase once silently dropped a
+`state.json` rewind, so a run processed 0 comments (cursor sat past the new
+batch). After editing `reporter/state.json`, `git show HEAD:reporter/state.json`
+to confirm the commit actually holds the value before dispatching.
 
 ## Status as of 2026-07-17 (pause point)
 **Working and verified end-to-end:** daily discovery → classification → digest (webhook transport) → plugin applies for mechanical AND creative directions; spatial pin targeting; style-aware ops; clarification messages formatted (bot transport code in place).

@@ -4,6 +4,8 @@ An external, self-firing Figma comment triage — no Claude Code session require
 
 Every weekday at **14:00 Africa/Cairo** a cloud job discovers new unresolved Figma comments, classifies + drafts a response to each with Claude, posts a **Slack digest**, and publishes **apply-ready jobs** that a companion **Figma plugin** executes on a `Claude Comments` page with one click per edit. Ambiguous comments become two-way Slack threads: reply in Slack to either clarify to Claude (re-triage) or post your reply into the Figma thread.
 
+A **web dashboard** (`dashboard/index.html`, deployed to GitHub Pages) sits on top of all this: monitor every run, trigger triage on demand, and clarify-to-Claude or reply-in-Figma per comment — from any machine you're signed into GitHub on. See [Dashboard](#dashboard-dashboardindexhtml).
+
 ```
 reporter/        GitHub Action, cron @ 14:00 Cairo (weekdays), also workflow_dispatch (force)
    discover (Figma REST) → classify+draft (claude CLI) → Slack digest → jobs/latest.json
@@ -100,6 +102,30 @@ styles**). Run `1a007e6` is the clean result. What we learned:
 batch). After editing `reporter/state.json`, `git show HEAD:reporter/state.json`
 to confirm the commit actually holds the value before dispatching.
 
+## Status as of 2026-07-18 (dashboard shipped)
+**New: a full web dashboard + control surface** (`dashboard/index.html`, documented below)
+is built, verified in Chromium (light + dark), and **deployed to GitHub Pages** via
+`.github/workflows/pages.yml` → `https://ahmedmarwan47-stack.github.io/figma-triage/`
+(enable once: Settings → Pages → Source = GitHub Actions). It's a single self-contained file —
+no build, no deps, no committed secrets.
+
+What it adds on top of the pipeline:
+- **Monitoring** — status strip, stat tiles, per-run activity chart, and a filterable inbox of
+  every triaged comment (mechanical ops as readable steps, creative directions, clarifications).
+- **Theme toggle** — System / Light / Dark, remembered per browser.
+- **Live actions from the browser** — *Run triage now* (dispatches `triage.yml` and opens a
+  dedicated **run page** that watches the run and shows its drafts), plus a per-comment
+  *Reply / clarify* composer (*Send to Claude* re-triages via a committed `clarifications/<id>.json`;
+  *Post in Figma* posts your reply through the new `figma-reply.yml` workflow). These use a
+  fine-grained **GitHub token the user pastes once, stored only in that browser**; the Figma
+  token stays server-side in Actions secrets. No token → each button falls back to GitHub's own
+  UI, so it still works on any machine you're signed into.
+- **This collapses most of the un-deployed worker's job into the page.** The worker (Slack
+  two-way loop) is still optional and still works in parallel if/when deployed.
+
+Still true from before: applying drafts happens only in the Figma plugin; `config.json →
+figma.includeAllUnresolved` is still `true` (test mode — flip to `false` for mention-only).
+
 ## Status as of 2026-07-17 (pause point)
 **Working and verified end-to-end:** daily discovery → classification → digest (webhook transport) → plugin applies for mechanical AND creative directions; spatial pin targeting; style-aware ops; clarification messages formatted (bot transport code in place).
 
@@ -115,8 +141,12 @@ to confirm the commit actually holds the value before dispatching.
 - Possible next upgrades discussed: Figma `FILE_COMMENT` webhooks into the worker for near-real-time triage (needs paid team plan); batching all comments into one claude call per run (token efficiency).
 
 ## For the next Claude Code session
-- **Branches:** development happened on `claude/tool-dev-markdown-files-f1716j`, fast-forwarded into `main` after each verified run. `main` is the source of truth; the plugin fetches `jobs/latest.json` from `main`'s raw URL.
-- **Trigger a run:** Actions → "Figma comment triage" → Run workflow → force. To re-scan already-processed comments first reset `reporter/state.json` to `{ "lastRunAt": null, "lastRunDate": null }` (the run commits new state + jobs back — pull before continuing).
+- **Branches:** the daily pipeline work happened on `claude/tool-dev-markdown-files-f1716j`; the
+  dashboard + Pages deploy + live actions landed on `claude/dashboard-build-features-na7kfp`
+  (PRs #1–#3, all merged). `main` is the source of truth — the plugin fetches `jobs/latest.json`
+  from `main`'s raw URL, and GitHub Pages deploys `dashboard/` from `main`.
+- **Trigger a run:** the dashboard's **Run triage now** (with a token connected), or Actions →
+  "Figma comment triage" → Run workflow → force. To re-scan already-processed comments first reset `reporter/state.json` to `{ "lastRunAt": null, "lastRunDate": null }` (the run commits new state + jobs back — pull before continuing).
 - **Local run:** `FORCE_RUN=1 FIGMA_TOKEN=… npm run triage` (prints digest to stdout without Slack vars).
 - **Plugin changes** must be re-imported by Ahmed in Figma desktop — send him `plugin/code.js` / `ui.html` after edits.
 - The user is Ahmed, a freelance web/UI designer (design principles are embedded in the `llm.mjs` system prompt: auto layout everywhere, styles by name never hex, 12px floor, first-person past-tense voice, banned buzzwords).

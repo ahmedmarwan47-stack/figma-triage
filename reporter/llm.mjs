@@ -60,10 +60,21 @@ MECHANICAL JOB — op vocabulary (the ONLY ops the plugin can run; emit nothing 
   set textStyleName to null and supply just colorStyleName. Do NOT restyle typography
   unless the comment explicitly asks to change the font, size, weight, or hierarchy.
 - { "op": "removeNode", "match": "<node name>" }
-- { "op": "cloneNode", "match": "<node name>" }
+- { "op": "cloneNode", "match": "<node name>", "count": <n, default 1> }
+  count>1 appends N copies after the source — use it to turn ONE tile/card/photo
+  into a row or grid (e.g. a "gallery of photos" from a single image frame).
 - { "op": "setFillColor", "match": "<node name>", "hex": "#1a2b3c" }
   FALLBACK ONLY: use setFillColor when no local paint style fits the requested
   color. Prefer setFillStyle with a real local style name whenever one exists.
+- { "op": "resizeNode", "match": "<node name>", "width": <px> | null, "height": <px> | null }
+  or { "op": "resizeNode", "match": "<node name>", "scale": <factor, e.g. 1.25> }
+  Use for "make it bigger/smaller". Prefer "scale" for "a little bigger" (keeps
+  aspect); use width/height for an exact size. Target the image/frame node, not
+  its text label.
+- { "op": "setLayout", "match": "<container frame name>", "mode": "HORIZONTAL" | "VERTICAL" | "NONE" | null, "itemSpacing": <px> | null, "layoutWrap": "WRAP" | "NO_WRAP" | null, "padding": <px> | null }
+  Restructures an auto-layout container. A grid = mode "HORIZONTAL" + layoutWrap
+  "WRAP". Use it (with cloneNode count) to build galleries/rows or to re-flow a
+  section. Only works on auto-layout frames — "match" MUST be the container.
 "match" targets a descendant of the duplicated node by its layer name (preferred) or, if you don't know the name, a snippet of its current text.
 
 OUTPUT — respond with ONLY a single JSON object, no prose, no markdown fences:
@@ -81,10 +92,15 @@ that direction into the same op vocabulary, so the plugin can execute the
 direction on a clone with one click. Be thorough: a recolor direction should
 list a setFillStyle/setFillColor/setTextStyle op for EVERY affected layer you
 can identify from the text inventory and children list (10–40 ops is normal).
-Use exact layer names from the inventory. The "aiPrompt" stays as an
-alternative route for what ops can't express (imagery, layout rework) — if a
-direction is truly not expressible in ops (e.g. "redraw the hero
-illustration"), set its "ops" to [] and rely on the aiPrompt.`;
+Use exact layer names from the inventory. Layout/sizing directions ARE now
+expressible: use resizeNode/scale for bigger-smaller, and cloneNode "count" +
+setLayout (mode + itemSpacing + layoutWrap "WRAP") for galleries, grids, and
+row/column re-flows. Reach for ops FIRST — only fall back to an empty "ops": []
++ aiPrompt when a direction genuinely needs new imagery or a redraw the plugin
+can't produce (e.g. "redraw the hero illustration", "replace with a photo of
+X"). Every direction that CAN be built from existing layers should ship real
+ops so it applies with one click. The "aiPrompt" stays as an alternative route
+regardless.`;
 
 // Walk the node subtree and collect every TEXT descendant so Claude can target
 // real layer names for setText / setTextStyle instead of guessing. When we know

@@ -52,8 +52,8 @@ Last N days / Custom range) that fills these inputs.
 
 ## Op vocabulary (MUST stay in sync in two places)
 Prompt in `reporter/llm.mjs` (what Claude may emit) ↔ interpreter in `plugin/code.js` (`runOps`, what executes):
-`duplicateTarget`, `setText`, `setFillStyle`, `setFillColor` (hex fallback when no local style fits), `setTextStyle` (textStyleName / colorStyleName independently optional), `removeNode`, `cloneNode`.
-Add any new op to **both** files.
+`duplicateTarget`, `setText`, `setFillStyle`, `setFillColor` (hex fallback when no local style fits), `setTextStyle` (textStyleName / colorStyleName independently optional), `removeNode`, `cloneNode` (`count` clones for galleries), `resizeNode` (`width`/`height` or `scale`), `setLayout` (auto-layout `mode` / `itemSpacing` / `layoutWrap` / `padding` — grid = HORIZONTAL + WRAP).
+Add any new op to **both** files. The layout/sizing ops (`resizeNode`, `setLayout`, `cloneNode count`) exist so creative directions like "make the photos bigger", "gallery of photos", and section re-flows compile to real ops and apply with one click instead of degrading to an aiPrompt.
 
 ## Context Claude gets per comment (all in `reporter/llm.mjs` + `index.mjs`)
 - Text-layer inventory of the commented node, **sorted by distance to the comment pin** (computed from `client_meta.node_offset` + bounding boxes) with each layer's ancestor chain (`inside: "Hero Form"(FRAME) → "Button"(FRAME)`) so container fills target the frame, not the label text.

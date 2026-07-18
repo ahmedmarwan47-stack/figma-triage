@@ -696,6 +696,10 @@ async function main() {
         author: it.commentAuthor,
         comment: it.commentText,
         rationale: it.rationale,
+        // The node screenshot for EVERY comment (jobs already carry it; this
+        // makes clarification + skipped comments show a preview too).
+        imageUrl: it.imageUrl ?? null,
+        link: it.link ?? null,
         jobTitle: it.verdict.job?.title ?? null,
         options: (it.verdict.options ?? []).map((o) => o.label),
         reply: it.verdict.reply ?? null,

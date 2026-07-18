@@ -9,8 +9,10 @@
   "networkAccess": {
     "allowedDomains": [
       "https://raw.githubusercontent.com",
-      "https://gist.githubusercontent.com"
+      "https://gist.githubusercontent.com",
+      "https://figma-alpha-api.s3.us-west-2.amazonaws.com",
+      "https://*.amazonaws.com"
     ],
-    "reasoning": "Fetches the day's triage jobs published by the reporter."
+    "reasoning": "Fetches the day's triage jobs from the reporter (GitHub raw) and shows the commented-node screenshots the reporter rendered (Figma image S3)."
   }
 }

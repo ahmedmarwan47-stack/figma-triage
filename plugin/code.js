@@ -135,9 +135,11 @@ function makeAutoFrame(name) {
 }
 
 // Plugin-side text (labels, captions inside our review frames). Uses plain
-// Inter with no dependency on the user's local text styles — those aren't
-// guaranteed to exist and are fragile to depend on for our own chrome.
-async function makePluginText(chars, { size = 12, bold = false, fill } = {}) {
+// Inter with no dependency on the user's local text styles. MUST append to an
+// auto-layout parent BEFORE setting layoutSizingHorizontal — Figma rejects
+// `layoutSizingHorizontal = "FILL"` on a node that isn't yet a child of an
+// auto-layout frame (that was the "node must be an auto-layout frame…" crash).
+async function appendPluginText(parent, chars, { size = 12, bold = false, fill } = {}) {
   const t = figma.createText();
   const style = bold ? "Bold" : "Regular";
   await figma.loadFontAsync({ family: "Inter", style });
@@ -145,7 +147,10 @@ async function makePluginText(chars, { size = 12, bold = false, fill } = {}) {
   t.fontSize = size;
   t.characters = chars || " ";
   if (fill) t.fills = [{ type: "SOLID", color: fill }];
-  t.layoutSizingHorizontal = "FILL";
+  parent.appendChild(t); // append first…
+  if (parent.layoutMode && parent.layoutMode !== "NONE") {
+    t.layoutSizingHorizontal = "FILL"; // …then FILL, now that it has an AL parent
+  }
   return t;
 }
 
@@ -358,13 +363,11 @@ async function applyCreativeOption(entry, targetId, optionIndex, styleMaps) {
   }
 
   const frame = makeAutoFrame(`[Direction] ${opt.label || `Option ${optionIndex + 1}`}`);
-  frame.appendChild(
-    await makePluginText(`“${entry.commentText || ""}” → ${opt.label || ""}`, {
-      size: 13,
-      bold: true,
-    }),
-  );
-  if (opt.caption) frame.appendChild(await makePluginText(opt.caption, { size: 11 }));
+  await appendPluginText(frame, `“${entry.commentText || ""}” → ${opt.label || ""}`, {
+    size: 13,
+    bold: true,
+  });
+  if (opt.caption) await appendPluginText(frame, opt.caption, { size: 11 });
 
   // Before / after, side by side: an untouched clone next to the clone the
   // direction ops run on, each under a label.
@@ -377,13 +380,13 @@ async function applyCreativeOption(entry, targetId, optionIndex, styleMaps) {
   const beforeCol = makeAutoFrame("Before");
   beforeCol.paddingTop = beforeCol.paddingBottom = 0;
   beforeCol.paddingLeft = beforeCol.paddingRight = 0;
-  beforeCol.appendChild(await makePluginText("BEFORE", { size: 11, bold: true }));
+  await appendPluginText(beforeCol, "BEFORE", { size: 11, bold: true });
   beforeCol.appendChild(await cloneTarget(targetId));
 
   const afterCol = makeAutoFrame("After");
   afterCol.paddingTop = afterCol.paddingBottom = 0;
   afterCol.paddingLeft = afterCol.paddingRight = 0;
-  afterCol.appendChild(await makePluginText("AFTER", { size: 11, bold: true }));
+  await appendPluginText(afterCol, "AFTER", { size: 11, bold: true });
   const root = await cloneTarget(targetId);
   afterCol.appendChild(root);
 

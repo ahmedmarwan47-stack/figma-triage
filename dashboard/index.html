@@ -251,13 +251,19 @@
   details.opsfold > summary::before { content: "▸ "; }
   details.opsfold[open] > summary::before { content: "▾ "; }
 
+  .optintro { font-size: 12.5px; color: var(--ink-2); margin: 6px 0 2px; }
   .option {
     border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-top: 8px;
     background: var(--page);
   }
+  .option.applyable { border-color: color-mix(in srgb, var(--cat-creative) 45%, var(--border)); }
+  .option .opthead { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
   .option .optlabel { font-weight: 620; font-size: 13px; }
-  .option .optmeta { font-size: 11.5px; color: var(--muted); margin-left: 6px; }
+  .option .optmeta { font-size: 11.5px; color: var(--muted); }
+  .option .optmeta.ok { color: var(--cat-creative); font-weight: 570; }
   .option .optcaption { font-size: 12.5px; color: var(--ink-2); margin: 3px 0 6px; }
+  .option .optcaption b { color: var(--ink-2); font-weight: 620; }
+  .clarifynudge { margin: 8px 0 0; }
 
   .replybox {
     border: 1px solid var(--border); border-left: 3px solid var(--cat-clarification);
@@ -1530,7 +1536,21 @@ function describeOp(op) {
       break;
     }
     case "removeNode": add("Remove ", quoted(op.match)); break;
-    case "cloneNode": add("Clone ", quoted(op.match)); break;
+    case "cloneNode":
+      add("Clone ", quoted(op.match), op.count > 1 ? ` ×${op.count}` : "");
+      break;
+    case "resizeNode":
+      if (op.scale != null) add("Resize ", quoted(op.match), ` → ×${op.scale}`);
+      else add("Resize ", quoted(op.match), ` → ${op.width ?? "auto"}×${op.height ?? "auto"}`);
+      break;
+    case "setLayout": {
+      const bits = [];
+      if (op.mode) bits.push(op.layoutWrap === "WRAP" && op.mode === "HORIZONTAL" ? "grid (wrap)" : op.mode.toLowerCase());
+      if (op.itemSpacing != null) bits.push(`gap ${op.itemSpacing}`);
+      if (op.padding != null) bits.push(`pad ${op.padding}`);
+      add("Layout of ", quoted(op.match), " → ", bits.join(" · ") || "auto layout");
+      break;
+    }
     default: {
       const { op: name, ...rest } = op;
       add(el("code", { text: name || "unknown op" }), " ", el("span", { class: "hint", text: JSON.stringify(rest) }));
@@ -1586,20 +1606,24 @@ function renderItem(it, { showRunTag }) {
   }
 
   if (it.category === "creative" && it.options && it.options.length) {
-    for (const o of it.options) {
+    body.append(el("p", { class: "optintro", text: "Pick a direction, then hit its Apply in the Claude Comments plugin — each lands on its own labelled clone so you can compare." }));
+    it.options.forEach((o, oi) => {
       const nOps = (o.ops || []).length;
-      const opt = el("div", { class: "option" },
-        el("div", {},
-          el("span", { class: "optlabel", text: o.label || "Direction" }),
-          el("span", { class: "optmeta", text: nOps ? `${nOps} ops — one click in the plugin` : "Figma AI route only (no ops)" })),
-        o.caption ? el("div", { class: "optcaption", text: o.caption }) : null,
+      const opt = el("div", { class: "option" + (nOps ? " applyable" : "") },
+        el("div", { class: "opthead" },
+          el("span", { class: "optlabel" }, `Direction ${oi + 1}: `, o.label || "Direction"),
+          el("span", { class: nOps ? "optmeta ok" : "optmeta", text: nOps ? `✓ ${nOps} ops — one-click Apply in the plugin` : "Figma AI route only" })),
+        // The direction's description = what the result will look like.
+        o.caption ? el("div", { class: "optcaption" }, el("b", { text: "What you'll get: " }), o.caption) : null,
         nOps ? opsFold(o.ops, `show the ${nOps} ops`) : null,
         o.aiPrompt ? el("div", { class: "itemactions" },
-          el("button", { class: "btn small", onclick: () => copyText(o.aiPrompt, "AI prompt") }, "Copy AI prompt"),
-          el("span", { class: "hint", text: "paste into Figma's AI panel" })) : null,
+          el("button", { class: "btn small", onclick: () => copyText(o.aiPrompt, "AI prompt") }, nOps ? "Copy Figma-AI prompt (alt route)" : "Copy Figma-AI prompt"),
+          el("span", { class: "hint", text: nOps ? "or apply the ops in the plugin" : "paste into Figma's AI panel to apply" })) : null,
       );
       body.append(opt);
-    }
+    });
+    body.append(el("p", { class: "hint clarifynudge" }, "Claude misread the intent? Hit ",
+      el("b", { text: "Reply / clarify" }), " below to correct it — it re-triages with your note and re-drafts the directions."));
   }
 
   if (it.category === "clarification" && it.reply) {

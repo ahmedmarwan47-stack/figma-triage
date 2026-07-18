@@ -266,7 +266,44 @@ async function runOps(ops, root, frame, { paints, texts }) {
         }
         case "cloneNode": {
           const n = findMatch(root || frame, op.match);
-          if (n && "clone" in n) n.parent.appendChild(n.clone());
+          if (n && "clone" in n) {
+            // count clones (default 1) — appended after the source, so a
+            // "gallery of photos" direction can multiply one tile into many.
+            const count = Math.max(1, Math.min(24, Number(op.count) || 1));
+            for (let c = 0; c < count; c++) n.parent.appendChild(n.clone());
+          }
+          break;
+        }
+        case "resizeNode": {
+          const n = findMatch(root || frame, op.match);
+          if (!n) throw new Error(`resizeNode: no node for "${op.match}"`);
+          if (op.scale != null) {
+            const f = Number(op.scale);
+            if (!(f > 0) || !("rescale" in n)) throw new Error(`resizeNode: bad scale ${op.scale}`);
+            n.rescale(f);
+          } else if ("resize" in n) {
+            const w = op.width != null ? Number(op.width) : n.width;
+            const h = op.height != null ? Number(op.height) : n.height;
+            if (!(w > 0) || !(h > 0)) throw new Error(`resizeNode: bad size ${w}x${h}`);
+            n.resize(w, h);
+          } else {
+            throw new Error(`resizeNode: "${op.match}" can't be resized`);
+          }
+          break;
+        }
+        case "setLayout": {
+          const n = findMatch(root || frame, op.match);
+          if (!n) throw new Error(`setLayout: no node for "${op.match}"`);
+          if (!("layoutMode" in n)) throw new Error(`setLayout: "${op.match}" is not an auto-layout container`);
+          if (op.mode) n.layoutMode = op.mode; // "HORIZONTAL" | "VERTICAL" | "NONE"
+          if (n.layoutMode !== "NONE") {
+            if (op.itemSpacing != null) n.itemSpacing = Number(op.itemSpacing);
+            if (op.layoutWrap) n.layoutWrap = op.layoutWrap; // "WRAP" | "NO_WRAP"
+            if (op.padding != null) {
+              const p = Number(op.padding);
+              n.paddingTop = n.paddingRight = n.paddingBottom = n.paddingLeft = p;
+            }
+          }
           break;
         }
         default:

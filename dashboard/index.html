@@ -251,6 +251,15 @@
   details.opsfold > summary::before { content: "▸ "; }
   details.opsfold[open] > summary::before { content: "▾ "; }
 
+  #attendedBtn.on { border-color: color-mix(in srgb, var(--good) 60%, var(--border)); color: var(--good); }
+  .qchip {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 11.5px; border: 1px solid var(--border); border-radius: 999px;
+    padding: 2px 9px; color: var(--ink-2); white-space: nowrap;
+  }
+  .qchip.ok { color: var(--good); border-color: color-mix(in srgb, var(--good) 50%, var(--border)); }
+  .qchip.err { color: #d03b3b; border-color: color-mix(in srgb, #d03b3b 50%, var(--border)); }
+  .qchip.wait { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 55%, var(--border)); }
   .optintro { font-size: 12.5px; color: var(--ink-2); margin: 6px 0 2px; }
   .option {
     border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-top: 8px;
@@ -451,7 +460,8 @@
     </div>
     <div class="actions">
       <button class="btn" id="ghBtn" title="Connect GitHub for one-click actions">Connect GitHub</button>
-      <button class="btn" id="refreshBtn" title="Re-fetch all data">↻ Refresh</button>
+      <button class="btn" id="attendedBtn" title="Attended mode: mechanical drafts auto-apply via the Claude executor">⚪ Unattended</button>
+      <button class="btn" id="refreshBtn" title="Re-fetch all data, including apply statuses">↻ Refresh</button>
       <button class="btn" id="viewRunBtn" title="Open the latest triage run's drafts page — no new run" style="display:none">Last run ↗</button>
       <button class="btn primary" id="triggerBtn" title="Run the triage workflow now">Run triage now</button>
     </div>
@@ -491,8 +501,10 @@
     <div class="cols">
       <div>
         <b style="color:var(--ink-2)">Applying drafts</b><br />
-        Mechanical &amp; creative drafts are applied from the <i>Claude&nbsp;Comments</i> plugin inside Figma
-        (it reads <code>jobs/latest.json</code>). This page is read-only.
+        Two routes: <b>Apply via Claude</b> queues the edit for the Claude executor (applies onto the
+        <i>Claude&nbsp;Comments</i> page — no Figma needed; ↻&nbsp;Refresh shows status), or apply yourself
+        from the <i>Claude&nbsp;Comments</i> plugin inside Figma. <b>Attended</b> auto-applies mechanical
+        drafts via Claude.
       </div>
       <div>
         <b style="color:var(--ink-2)">Reply / clarify</b><br />
@@ -958,6 +970,71 @@ async function clearSelectionForComment(item) {
   } catch (e) { handleGhError(e); return false; }
 }
 
+/* ---- Apply queue: the Claude-executor hand-off (jobs/apply-queue.json).
+       The dashboard writes attended + apply requests; a Claude session with the
+       Figma MCP applies them onto the "Claude Comments" clone page and writes
+       status back. ↻ Refresh re-reads the statuses. ------------------------- */
+
+async function freshApplyQueue() {
+  let current = state.applyQueue || { attended: false, requests: {} };
+  try {
+    const fresh = await fetchJSON("jobs/apply-queue.json", { optional: true });
+    if (fresh && typeof fresh === "object") current = fresh;
+  } catch { /* use in-memory */ }
+  return { attended: !!current.attended, requests: { ...(current.requests || {}) } };
+}
+
+async function toggleAttended() {
+  if (!gh.has()) { openGhDialog("Connect a GitHub token to switch attended mode — it writes jobs/apply-queue.json."); return; }
+  try {
+    const q = await freshApplyQueue();
+    q.attended = !q.attended;
+    await ghPutJson("jobs/apply-queue.json", q, `attended: ${q.attended ? "on" : "off"} via dashboard`);
+    state.applyQueue = q;
+    renderAll();
+    toast(q.attended ? "Attended ON — mechanical drafts auto-apply via Claude" : "Attended OFF — nothing applies without your click");
+  } catch (e) { handleGhError(e); }
+}
+
+async function enqueueApply(item, optionIndex = null) {
+  if (!item.commentId) { toast("This comment has no id"); return false; }
+  if (!gh.has()) { openGhDialog("Connect a GitHub token to queue an instant apply — it writes jobs/apply-queue.json."); return false; }
+  try {
+    const q = await freshApplyQueue();
+    q.requests[String(item.commentId)] = {
+      fileKey: item.fileKey || null,
+      category: item.category,
+      optionIndex,
+      optionLabel: optionIndex != null && item.options
+        ? (item.options[optionIndex] && item.options[optionIndex].label) || null : null,
+      requestedAt: new Date().toISOString(),
+      status: "queued",
+    };
+    await ghPutJson("jobs/apply-queue.json", q,
+      `apply: comment ${item.commentId}${optionIndex != null ? ` direction ${optionIndex + 1}` : ""} via dashboard`);
+    state.applyQueue = q;
+    toast("Queued — Claude applies it onto the Claude Comments page");
+    return true;
+  } catch (e) { handleGhError(e); return false; }
+}
+
+// Status chip shown on each card, driven by the queue file.
+function queueChip(it) {
+  const req = state.applyQueue.requests[String(it.commentId)];
+  if (req) {
+    const cls = req.status === "applied" ? "ok" : req.status === "failed" ? "err" : "wait";
+    const label = req.status === "applied" ? "✓ applied by Claude"
+      : req.status === "failed" ? "✕ apply failed" : "⏳ queued for Claude";
+    const chip = el("span", { class: `qchip ${cls}`, text: req.optionLabel ? `${label} · ${req.optionLabel}` : label });
+    if (req.status === "failed" && req.error) chip.title = req.error;
+    return chip;
+  }
+  if (state.applyQueue.attended && it.category === "mechanical" && it.ops && it.ops.length) {
+    return el("span", { class: "qchip wait", text: "auto-applies (attended)" });
+  }
+  return null;
+}
+
 async function replyInFigma(item, text) {
   if (!item.commentId || !item.fileKey) { toast("This comment has no Figma reference"); return false; }
   if (!gh.has()) {
@@ -1181,6 +1258,11 @@ let state = {
   latest: null,           // jobs/latest.json
   days: [],               // [{date, generatedAt, items:[...], counts:{cat:n}}] sorted asc
   selections: {},         // jobs/selections.json — { commentId: { optionIndex, optionLabel, fileKey, ts } }
+  // jobs/apply-queue.json — the Claude-executor hand-off. `attended: true` asks
+  // the executor to auto-apply every mechanical draft without per-item requests;
+  // `requests` holds explicit clicks (mechanical Apply + picked creative
+  // directions). The executor writes status/appliedAt/error back and commits.
+  applyQueue: { attended: false, requests: {} },
   filters: { run: "latest", cat: "all", file: "all", q: "" },
 };
 
@@ -1237,13 +1319,17 @@ async function loadAll({ soft = false } = {}) {
   const banner = $("errBanner");
   try {
     usedSource = null;
-    const [config, cursor, latest, selections] = await Promise.all([
+    const [config, cursor, latest, selections, applyQueue] = await Promise.all([
       fetchJSON("config.json", { optional: true }),
       fetchJSON("reporter/state.json", { optional: true }),
       fetchJSON("jobs/latest.json"),
       fetchJSON("jobs/selections.json", { optional: true }),
+      fetchJSON("jobs/apply-queue.json", { optional: true }),
     ]);
     state.selections = selections || {};
+    state.applyQueue = applyQueue && typeof applyQueue === "object"
+      ? { attended: !!applyQueue.attended, requests: applyQueue.requests || {} }
+      : { attended: false, requests: {} };
     const dates = await discoverRunDates(latest && latest.date);
     const dayFiles = await Promise.allSettled(dates.map((d) => fetchJSON(`jobs/${d}.json`, { optional: true })));
     const days = [];
@@ -1644,6 +1730,7 @@ function renderItem(it, { showRunTag }) {
     el("span", { class: "badge" }, el("span", { class: "dot", style: `background:${CAT_COLOR(it.category)}` }), cat.label),
     showRunTag ? el("span", { class: "runtag", text: `run ${fmtDayLabel(it.date)}` }) : null,
     isPending ? el("span", { class: "pendingtag", text: "● pending in plugin" }) : null,
+    queueChip(it),
   );
   body.append(top);
 
@@ -1665,13 +1752,20 @@ function renderItem(it, { showRunTag }) {
     let chosen = committed && Number.isInteger(committed.optionIndex) ? committed.optionIndex : null;
     const radioName = `dir-${it.commentId}`;
     const optionEls = [];
-    const sendBtn = el("button", { class: "btn small primary" }, "Send to plugin ▸");
+    const applyBtn = el("button", { class: "btn small primary" }, "Apply via Claude ▸");
+    const sendBtn = el("button", { class: "btn small" }, "Send to plugin ▸");
     const clearBtn = el("button", { class: "btn small" }, "Clear");
     const statusEl = el("span", { class: "hint selstatus" });
 
     const refresh = () => {
       optionEls.forEach((elx, i) => elx.classList.toggle("selected", i === chosen));
       const sentIdx = committed && Number.isInteger(committed.optionIndex) ? committed.optionIndex : null;
+      const req = state.applyQueue.requests[String(it.commentId)];
+      applyBtn.disabled = chosen == null || (req && req.status === "queued" && req.optionIndex === chosen);
+      const chosenHasOps = chosen != null && ((it.options[chosen] || {}).ops || []).length > 0;
+      applyBtn.title = chosen == null ? "Pick a direction first"
+        : chosenHasOps ? "Claude applies this direction onto the Claude Comments page"
+        : "This direction has no drafted ops — Claude will attempt it from the description";
       sendBtn.disabled = chosen == null || chosen === sentIdx;
       clearBtn.style.display = sentIdx != null ? "" : "none";
       statusEl.textContent = sentIdx != null
@@ -1701,6 +1795,13 @@ function renderItem(it, { showRunTag }) {
       body.append(opt);
     });
 
+    applyBtn.addEventListener("click", async () => {
+      if (chosen == null) return;
+      applyBtn.disabled = true;
+      // Record the pick (also keeps the plugin view in sync), then queue the apply.
+      if (await sendSelectionToPlugin(it, chosen)) committed = state.selections[String(it.commentId)];
+      if (await enqueueApply(it, chosen)) renderAll(); else refresh();
+    });
     sendBtn.addEventListener("click", async () => {
       if (chosen == null) return;
       if (await sendSelectionToPlugin(it, chosen)) {
@@ -1714,7 +1815,7 @@ function renderItem(it, { showRunTag }) {
         refresh();
       }
     });
-    body.append(el("div", { class: "itemactions sendrow" }, sendBtn, clearBtn, statusEl));
+    body.append(el("div", { class: "itemactions sendrow" }, applyBtn, sendBtn, clearBtn, statusEl));
     body.append(el("p", { class: "hint clarifynudge" }, "Claude misread the intent? Hit ",
       el("b", { text: "Reply / clarify" }), " below to correct it — it re-triages with your note and re-drafts the directions."));
     refresh();
@@ -1731,6 +1832,16 @@ function renderItem(it, { showRunTag }) {
 
   const composer = (it.commentId && it.fileKey) ? buildComposer(it) : null;
   const actions = el("div", { class: "itemactions" });
+  if (it.category === "mechanical" && it.ops && it.ops.length) {
+    const req = state.applyQueue.requests[String(it.commentId)];
+    const applyBtn = el("button", { class: "btn small primary" }, req && req.status === "applied" ? "Re-apply via Claude" : "Apply via Claude ▸");
+    if (req && req.status === "queued") { applyBtn.disabled = true; applyBtn.textContent = "Queued…"; }
+    applyBtn.addEventListener("click", async () => {
+      applyBtn.disabled = true;
+      if (await enqueueApply(it)) renderAll(); else applyBtn.disabled = false;
+    });
+    actions.append(applyBtn);
+  }
   if (it.link) actions.append(el("a", { class: "btn small", href: it.link, target: "_blank", rel: "noopener" }, "Open in Figma ↗"));
   if (composer) actions.append(el("button", { class: "btn small", onclick: () => composer.classList.toggle("open") }, "Reply / clarify ▾"));
   if (it.commentId) actions.append(el("span", { class: "hint", text: `comment ${it.commentId}` }));
@@ -1794,6 +1905,13 @@ function renderAll() {
   renderFilters();
   renderInbox();
   $("viewRunBtn").style.display = state.days.length ? "" : "none";
+  const att = !!(state.applyQueue && state.applyQueue.attended);
+  const ab = $("attendedBtn");
+  ab.textContent = att ? "🟢 Attended" : "⚪ Unattended";
+  ab.classList.toggle("on", att);
+  ab.title = att
+    ? "Attended: the Claude executor auto-applies mechanical drafts onto the Claude Comments page. Click to turn off."
+    : "Unattended: nothing applies without your click. Click to auto-apply mechanical drafts via Claude.";
 }
 
 $("refreshBtn").addEventListener("click", () => loadAll({ soft: true }));
@@ -1818,6 +1936,7 @@ setInterval(() => loadAll({ soft: true }), 5 * 60 * 1000);
 
 $("runBack").addEventListener("click", exitRunView);
 $("viewRunBtn").addEventListener("click", viewLatestRun);
+$("attendedBtn").addEventListener("click", toggleAttended);
 
 initTheme();
 initGh();

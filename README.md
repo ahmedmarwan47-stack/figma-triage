@@ -13,6 +13,7 @@ worker/          Cloudflare Worker (two-way Slack bridge)  ⚠️ NOT YET DEPLOY
    Slack thread reply → clarifications/<id>.json + re-triage  |  "figma:" prefix → posts reply in Figma thread
 clarifications/  written by worker, consumed + deleted by reporter
 jobs/            per-day triage output + latest.json (the plugin's feed)
+dashboard/       read-only web dashboard over jobs/ + state.json + config.json (see Dashboard)
 ```
 
 ## Why it's split this way
@@ -119,6 +120,29 @@ to confirm the commit actually holds the value before dispatching.
 - **Local run:** `FORCE_RUN=1 FIGMA_TOKEN=… npm run triage` (prints digest to stdout without Slack vars).
 - **Plugin changes** must be re-imported by Ahmed in Figma desktop — send him `plugin/code.js` / `ui.html` after edits.
 - The user is Ahmed, a freelance web/UI designer (design principles are embedded in the `llm.mjs` system prompt: auto layout everywhere, styles by name never hex, 12px floor, first-person past-tense voice, banned buzzwords).
+
+## Dashboard (`dashboard/index.html`)
+A single self-contained HTML file (no build, no deps, no secrets) that gives a read-only
+view over everything the pipeline publishes:
+
+- **Status strip** — last run (Cairo time), next scheduled run, cursor from `reporter/state.json`,
+  watched-file count, and a ⚠ banner while `config.json → figma.includeAllUnresolved` is true.
+- **Stat tiles** — pending drafts in `jobs/latest.json`, open clarifications, all-time comments
+  triaged, ops drafted.
+- **Activity chart** — comments per run day stacked by category, with tooltips and a table view.
+  Clicking a bar filters the inbox to that run.
+- **Inbox** — every triaged comment grouped by file, filterable by run / category / file / free
+  text (filters sync to the URL hash, so views are shareable). Mechanical cards show the drafted
+  ops as readable steps; creative cards show each direction with its op count and a
+  **Copy AI prompt** button; clarification cards show the drafted reply with a **Copy reply**
+  button and the two Slack answer routes. "Pending in plugin" marks what `latest.json` is
+  currently serving to the plugin.
+
+**How to open:** it works from anywhere — double-click the file (it then reads `main` via
+`raw.githubusercontent.com`), serve the repo root (`npx serve` / `python3 -m http.server` →
+`/dashboard/`, reads the local checkout), or enable GitHub Pages on `main` and bookmark
+`/dashboard/`. `?repo=owner/name` overrides the source repo. Applying drafts still happens
+only in the Figma plugin — the dashboard is deliberately read-only.
 
 ## Post a drafted reply manually (gated)
 ```bash

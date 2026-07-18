@@ -1,0 +1,47 @@
+name: Deploy dashboard to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "dashboard/**"
+      - "jobs/**"
+      - "reporter/state.json"
+      - "config.json"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble site
+        run: |
+          # Mirror the repo layout so the dashboard's ../jobs/ fetches hit the
+          # same origin instead of falling back to raw.githubusercontent.
+          mkdir -p _site/dashboard _site/jobs _site/reporter
+          cp -r dashboard/* _site/dashboard/
+          cp -r jobs/* _site/jobs/ 2>/dev/null || true
+          cp reporter/state.json _site/reporter/state.json 2>/dev/null || true
+          cp config.json _site/config.json 2>/dev/null || true
+          # Land on the dashboard from the site root.
+          printf '<!doctype html><meta http-equiv="refresh" content="0; url=./dashboard/">' > _site/index.html
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4

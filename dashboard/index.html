@@ -257,6 +257,9 @@
     background: var(--page);
   }
   .option.applyable { border-color: color-mix(in srgb, var(--cat-creative) 45%, var(--border)); }
+  .option.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; background: color-mix(in srgb, var(--accent) 7%, var(--page)); }
+  .option .optpick { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; }
+  .option .optpick .optradio { margin: 0; cursor: pointer; }
   .option .opthead { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
   .option .optlabel { font-weight: 620; font-size: 13px; }
   .option .optmeta { font-size: 11.5px; color: var(--muted); }
@@ -909,6 +912,52 @@ async function clarifyComment(item, text) {
   } catch (e) { handleGhError(e); return false; }
 }
 
+// Direction pick → committed to jobs/selections.json, which the plugin reads to
+// show ONLY the chosen direction for that comment (keeps the plugin uncluttered).
+async function sendSelectionToPlugin(item, optionIndex) {
+  if (!item.commentId) { toast("This comment has no id"); return false; }
+  if (!gh.has()) {
+    openGhDialog("Connect a GitHub token to send a direction to the plugin — it writes jobs/selections.json (Actions + Contents read/write).");
+    return false;
+  }
+  try {
+    // Merge onto the freshest committed selections so we don't clobber others.
+    let current = state.selections || {};
+    try {
+      const fresh = await fetchJSON("jobs/selections.json", { optional: true });
+      if (fresh && typeof fresh === "object") current = fresh;
+    } catch { /* use in-memory */ }
+    const map = { ...current };
+    map[String(item.commentId)] = {
+      optionIndex,
+      optionLabel: (item.options[optionIndex] && item.options[optionIndex].label) || null,
+      fileKey: item.fileKey || null,
+      ts: new Date().toISOString(),
+    };
+    await ghPutJson("jobs/selections.json", map, `select: direction ${optionIndex + 1} for comment ${item.commentId}`);
+    state.selections = map;
+    toast("Sent to plugin — it'll show just this direction");
+    return true;
+  } catch (e) { handleGhError(e); return false; }
+}
+
+async function clearSelectionForComment(item) {
+  if (!gh.has()) { openGhDialog("Connect a GitHub token to change plugin selections."); return false; }
+  try {
+    let current = state.selections || {};
+    try {
+      const fresh = await fetchJSON("jobs/selections.json", { optional: true });
+      if (fresh && typeof fresh === "object") current = fresh;
+    } catch { /* use in-memory */ }
+    const map = { ...current };
+    delete map[String(item.commentId)];
+    await ghPutJson("jobs/selections.json", map, `clear: direction for comment ${item.commentId}`);
+    state.selections = map;
+    toast("Selection cleared — plugin shows all directions again");
+    return true;
+  } catch (e) { handleGhError(e); return false; }
+}
+
 async function replyInFigma(item, text) {
   if (!item.commentId || !item.fileKey) { toast("This comment has no Figma reference"); return false; }
   if (!gh.has()) {
@@ -1131,6 +1180,7 @@ let state = {
   cursor: null,           // reporter/state.json
   latest: null,           // jobs/latest.json
   days: [],               // [{date, generatedAt, items:[...], counts:{cat:n}}] sorted asc
+  selections: {},         // jobs/selections.json — { commentId: { optionIndex, optionLabel, fileKey, ts } }
   filters: { run: "latest", cat: "all", file: "all", q: "" },
 };
 
@@ -1187,11 +1237,13 @@ async function loadAll({ soft = false } = {}) {
   const banner = $("errBanner");
   try {
     usedSource = null;
-    const [config, cursor, latest] = await Promise.all([
+    const [config, cursor, latest, selections] = await Promise.all([
       fetchJSON("config.json", { optional: true }),
       fetchJSON("reporter/state.json", { optional: true }),
       fetchJSON("jobs/latest.json"),
+      fetchJSON("jobs/selections.json", { optional: true }),
     ]);
+    state.selections = selections || {};
     const dates = await discoverRunDates(latest && latest.date);
     const dayFiles = await Promise.allSettled(dates.map((d) => fetchJSON(`jobs/${d}.json`, { optional: true })));
     const days = [];
@@ -1606,12 +1658,37 @@ function renderItem(it, { showRunTag }) {
   }
 
   if (it.category === "creative" && it.options && it.options.length) {
-    body.append(el("p", { class: "optintro", text: "Pick a direction, then hit its Apply in the Claude Comments plugin — each lands on its own labelled clone so you can compare." }));
+    body.append(el("p", { class: "optintro" }, "Choose the direction you want, then ",
+      el("b", { text: "Send to plugin" }), " — the plugin then shows just that one to apply, no clutter."));
+
+    let committed = state.selections[String(it.commentId)];
+    let chosen = committed && Number.isInteger(committed.optionIndex) ? committed.optionIndex : null;
+    const radioName = `dir-${it.commentId}`;
+    const optionEls = [];
+    const sendBtn = el("button", { class: "btn small primary" }, "Send to plugin ▸");
+    const clearBtn = el("button", { class: "btn small" }, "Clear");
+    const statusEl = el("span", { class: "hint selstatus" });
+
+    const refresh = () => {
+      optionEls.forEach((elx, i) => elx.classList.toggle("selected", i === chosen));
+      const sentIdx = committed && Number.isInteger(committed.optionIndex) ? committed.optionIndex : null;
+      sendBtn.disabled = chosen == null || chosen === sentIdx;
+      clearBtn.style.display = sentIdx != null ? "" : "none";
+      statusEl.textContent = sentIdx != null
+        ? `Plugin shows: ${it.options[sentIdx] && it.options[sentIdx].label || `Direction ${sentIdx + 1}`} ✓`
+        : "";
+    };
+
     it.options.forEach((o, oi) => {
       const nOps = (o.ops || []).length;
+      const radio = el("input", { type: "radio", name: radioName, class: "optradio" });
+      if (oi === chosen) radio.checked = true;
+      radio.addEventListener("change", () => { chosen = oi; refresh(); });
       const opt = el("div", { class: "option" + (nOps ? " applyable" : "") },
         el("div", { class: "opthead" },
-          el("span", { class: "optlabel" }, `Direction ${oi + 1}: `, o.label || "Direction"),
+          // Only the radio + label text selects — buttons/ops below don't.
+          el("label", { class: "optpick" }, radio,
+            el("span", { class: "optlabel" }, `Direction ${oi + 1}: `, o.label || "Direction")),
           el("span", { class: nOps ? "optmeta ok" : "optmeta", text: nOps ? `✓ ${nOps} ops — one-click Apply in the plugin` : "Figma AI route only" })),
         // The direction's description = what the result will look like.
         o.caption ? el("div", { class: "optcaption" }, el("b", { text: "What you'll get: " }), o.caption) : null,
@@ -1620,10 +1697,27 @@ function renderItem(it, { showRunTag }) {
           el("button", { class: "btn small", onclick: () => copyText(o.aiPrompt, "AI prompt") }, nOps ? "Copy Figma-AI prompt (alt route)" : "Copy Figma-AI prompt"),
           el("span", { class: "hint", text: nOps ? "or apply the ops in the plugin" : "paste into Figma's AI panel to apply" })) : null,
       );
+      optionEls.push(opt);
       body.append(opt);
     });
+
+    sendBtn.addEventListener("click", async () => {
+      if (chosen == null) return;
+      if (await sendSelectionToPlugin(it, chosen)) {
+        committed = state.selections[String(it.commentId)];
+        refresh();
+      }
+    });
+    clearBtn.addEventListener("click", async () => {
+      if (await clearSelectionForComment(it)) { committed = null; chosen = null;
+        for (const r of body.querySelectorAll(`input[name="${radioName}"]`)) r.checked = false;
+        refresh();
+      }
+    });
+    body.append(el("div", { class: "itemactions sendrow" }, sendBtn, clearBtn, statusEl));
     body.append(el("p", { class: "hint clarifynudge" }, "Claude misread the intent? Hit ",
       el("b", { text: "Reply / clarify" }), " below to correct it — it re-triages with your note and re-drafts the directions."));
+    refresh();
   }
 
   if (it.category === "clarification" && it.reply) {

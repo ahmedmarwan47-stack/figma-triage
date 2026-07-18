@@ -21,8 +21,11 @@
   .cardfoot { display: flex; justify-content: flex-end; margin-top: 6px; }
   .optionrow { display: flex; align-items: center; gap: 8px; padding: 8px; margin-top: 6px; border: 1px solid rgba(128,128,128,.22); border-radius: 6px; }
   .optionrow .optbody { flex: 1; min-width: 0; }
+  .optionrow.picked { border-color: #0d99ff; background: rgba(13,153,255,.07); }
   .optionrow .optlabel { font-weight: 600; }
+  .optionrow .picktag { display: inline-block; font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: #0d99ff; border: 1px solid rgba(13,153,255,.5); border-radius: 999px; padding: 0 5px; margin-left: 6px; vertical-align: middle; }
   .optionrow .optcaption { font-size: 11px; opacity: .65; }
+  button.showall { margin-top: 6px; font-size: 11px; padding: 4px 8px; }
   .others { border: 1px dashed rgba(128,128,128,.35); border-radius: 8px; padding: 10px; margin-top: 14px; }
   .others h3 { font-size: 11px; margin: 0 0 8px; text-transform: uppercase; letter-spacing: .04em; opacity: .55; }
   .filerow { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-top: 1px solid rgba(128,128,128,.15); }
@@ -55,6 +58,7 @@
   let fileKey = null;
   let jobs = [];         // jobs for THIS file
   let byOtherFile = {};  // { fileKey: { name, count } } — jobs for other files
+  let selections = {};   // { commentId: { optionIndex, optionLabel } } — chosen in the dashboard
 
   const $ = (id) => document.getElementById(id);
   const post = (msg) => parent.postMessage({ pluginMessage: msg }, "*");
@@ -83,6 +87,14 @@
       if (!res.ok) throw new Error(res.status + " " + res.statusText);
       const data = await res.json();
       const all = data.jobs || [];
+
+      // Direction picks made in the dashboard (optional file). When a creative
+      // comment has a pick, the plugin shows ONLY that direction — no clutter.
+      selections = {};
+      try {
+        const sres = await fetch(`${base}/selections.json?t=${Date.now()}`, { cache: "no-store" });
+        if (sres.ok) selections = (await sres.json()) || {};
+      } catch (e) { /* no selections file yet — show all directions */ }
       jobs = all.filter((j) => !fileKey || j.fileKey === fileKey);
       byOtherFile = {};
       for (const j of all) {
@@ -123,13 +135,15 @@
         if (j.category === "creative" && Array.isArray(j.options) && j.options.length) {
           // One Apply per direction — each lands on its own labeled clone so
           // directions can be compared side by side on the Claude Comments page.
-          j.options.forEach((opt, oi) => {
+          // If a direction was picked in the dashboard, show ONLY that one (with
+          // a toggle to reveal the rest) so the plugin stays uncluttered.
+          const renderOption = (opt, oi, picked) => {
             const row = document.createElement("div");
-            row.className = "optionrow";
+            row.className = "optionrow" + (picked ? " picked" : "");
             const hasOps = Array.isArray(opt.ops) && opt.ops.length;
             row.innerHTML = `
               <div class="optbody">
-                <div class="optlabel">${escapeHtml(opt.label || `Option ${oi + 1}`)}</div>
+                <div class="optlabel">${escapeHtml(opt.label || `Option ${oi + 1}`)}${picked ? ' <span class="picktag">picked</span>' : ""}</div>
                 <div class="optcaption">${escapeHtml(opt.caption || "")}</div>
               </div>
               ${opt.aiPrompt ? `<button class="secondary copyai" title="Copy this direction's Figma AI prompt to paste into Figma's AI">Prompt</button>` : ""}
@@ -146,7 +160,26 @@
               setStatus("Applying direction: " + (opt.label || oi + 1));
             };
             card.appendChild(row);
-          });
+          };
+
+          const sel = selections[String(j.commentId)];
+          const pick = sel && Number.isInteger(sel.optionIndex) && sel.optionIndex >= 0 && sel.optionIndex < j.options.length
+            ? sel.optionIndex : null;
+          if (pick != null) {
+            renderOption(j.options[pick], pick, true);
+            if (j.options.length > 1) {
+              const more = document.createElement("button");
+              more.className = "secondary showall";
+              more.textContent = `Show other ${j.options.length - 1} direction${j.options.length - 1 === 1 ? "" : "s"}`;
+              more.onclick = () => {
+                more.remove();
+                j.options.forEach((opt, oi) => { if (oi !== pick) renderOption(opt, oi, false); });
+              };
+              card.appendChild(more);
+            }
+          } else {
+            j.options.forEach((opt, oi) => renderOption(opt, oi, false));
+          }
         } else {
           const foot = document.createElement("div");
           foot.className = "cardfoot";

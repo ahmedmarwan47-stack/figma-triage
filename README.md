@@ -143,6 +143,10 @@ view over everything the pipeline publishes:
   `clarifications/<id>.json` + dispatches the workflow, exactly like the Slack route);
   *Post in Figma* replies as you in the thread (via the `figma-reply.yml` workflow, so
   `FIGMA_TOKEN` stays in Actions secrets). See **Live actions & auth** below.
+- **Run page** — hitting *Run triage now* opens a dedicated run view that watches the
+  workflow (polling `main`'s `latest.json` for a fresh `generatedAt`, plus the Actions run
+  status when a token is connected) and, when it lands, shows a per-category summary and
+  exactly the drafts that run produced. Back returns to the dashboard with the new run merged in.
 
 **How to open:** it works from anywhere — double-click the file (it then reads `main` via
 `raw.githubusercontent.com`), serve the repo root (`npx serve` / `python3 -m http.server` →

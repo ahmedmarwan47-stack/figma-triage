@@ -282,6 +282,26 @@
   footer { margin-top: 34px; font-size: 12.5px; color: var(--muted); line-height: 1.7; }
   footer .cols { display: flex; gap: 28px; flex-wrap: wrap; }
 
+  /* run view */
+  .runhead { display: flex; align-items: center; gap: 12px; margin: 16px 0 10px; flex-wrap: wrap; }
+  .runhead h2 { margin: 0; font-size: 19px; font-weight: 640; letter-spacing: -0.01em; }
+  .runstatus {
+    display: flex; align-items: center; gap: 12px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 14px 16px; margin-bottom: 16px; box-shadow: var(--shadow);
+  }
+  .runstatus .spinner {
+    width: 17px; height: 17px; border-radius: 50%; flex: none;
+    border: 2px solid var(--grid); border-top-color: var(--accent); animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .runstatus .statedot { width: 20px; height: 20px; border-radius: 50%; flex: none; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; color: #fff; background: var(--good); }
+  .runstatus.error .statedot { background: #d03b3b; }
+  .runstatus .rtext { flex: 1; min-width: 0; }
+  .runstatus .rtext b { color: var(--ink); font-weight: 600; }
+  .runstatus .rsub { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+  .runstatus .runactions { display: flex; gap: 8px; flex: none; }
+
   /* connect-GitHub dialog */
   dialog.gh {
     border: 1px solid var(--border); border-radius: 14px; padding: 0;
@@ -359,6 +379,7 @@
     <button class="btn primary" id="triggerBtn" title="Run the triage workflow now">Run triage now</button>
   </div>
 
+  <div id="dashView">
   <div class="statusstrip fade" id="statusStrip"></div>
 
   <div class="errbanner" id="errBanner"></div>
@@ -408,6 +429,17 @@
       </div>
     </div>
   </footer>
+  </div><!-- #dashView -->
+
+  <section id="runView" hidden aria-label="Triage run">
+    <div class="runhead">
+      <button class="btn small" id="runBack">← Back to dashboard</button>
+      <h2 id="runTitle">Triage run</h2>
+    </div>
+    <div class="runstatus" id="runStatus"></div>
+    <div class="tiles" id="runTiles" style="display:none"></div>
+    <div id="runInbox"></div>
+  </section>
 </div>
 
 <dialog class="gh" id="ghDialog" aria-label="Connect GitHub">
@@ -536,20 +568,155 @@ function handleGhError(e) {
   }
 }
 
-async function runTriage() {
-  if (!gh.has()) {
+/* ---- Run view: hit "Run triage" → a page that watches the run, then shows
+       exactly the drafts that run produced. ---------------------------------- */
+
+let runState = null;
+
+function enterRunView() {
+  $("dashView").style.display = "none";
+  $("runView").hidden = false;
+  window.scrollTo(0, 0);
+}
+function exitRunView() {
+  stopRunPolling();
+  runState = null;
+  $("runView").hidden = true;
+  $("dashView").style.display = "";
+  loadAll({ soft: true }); // reflect any new run in the dashboard
+}
+function stopRunPolling() {
+  if (runState && runState.timer) { clearInterval(runState.timer); runState.timer = null; }
+}
+
+function setRunStatus({ spinning, text, sub, error, done, runUrl, showCheck }) {
+  const s = $("runStatus");
+  s.className = "runstatus" + (error ? " error" : "") + (done ? " done" : "");
+  s.replaceChildren(
+    spinning ? el("div", { class: "spinner" }) : el("div", { class: "statedot", text: error ? "!" : "✓" }),
+    el("div", { class: "rtext" }, el("div", {}, el("b", { text: text || "" })), sub ? el("div", { class: "rsub", text: sub }) : null),
+    el("div", { class: "runactions" },
+      showCheck ? el("button", { class: "btn small", onclick: () => pollRun() }, "Check now") : null,
+      runUrl ? el("a", { class: "btn small", href: runUrl, target: "_blank", rel: "noopener" }, "Open run log ↗") : null),
+  );
+}
+
+async function startTriageRun() {
+  runState = { dispatchAt: Date.now(), baselineGen: (state.latest && state.latest.generatedAt) || null, timer: null, done: false, runUrl: null };
+  enterRunView();
+  $("runTitle").textContent = "New triage run";
+  $("runTiles").style.display = "none";
+  $("runInbox").replaceChildren();
+  setRunStatus({ spinning: true, text: "Starting…" });
+
+  if (gh.has()) {
+    try {
+      await ghDispatch("triage.yml", { force: "true" });
+    } catch (e) {
+      setRunStatus({ spinning: false, error: true, text: "Couldn't start the run", sub: String((e && e.message) || e), showCheck: false });
+      handleGhError(e);
+      return;
+    }
+    setRunStatus({ spinning: true, text: "Triage is running…", sub: "Discovering comments and drafting edits — usually ~2 minutes.", showCheck: true });
+  } else {
     window.open(`https://github.com/${REPO}/actions/workflows/triage.yml`, "_blank", "noopener");
-    openGhDialog("Opened GitHub's own run page (works anywhere you're signed in). Connect a token to run it in one click from here.");
+    setRunStatus({ spinning: true, text: "Waiting for the run…", sub: "Click ‘Run workflow’ on the GitHub tab that opened. New drafts appear here automatically. (Connect a token to skip this step.)", showCheck: true });
+  }
+  runState.timer = setInterval(pollRun, 12000);
+  setTimeout(pollRun, 8000);
+}
+
+async function pollRun() {
+  if (!runState || runState.done) return;
+  const elapsed = Math.round((Date.now() - runState.dispatchAt) / 1000);
+
+  // Source of truth the run finished + committed: a fresh latest.json on main.
+  let latestData = null;
+  try {
+    const res = await fetch(`${RAW_BASE}/jobs/latest.json?t=${Date.now()}`, { cache: "no-store" });
+    if (res.ok) latestData = await res.json();
+  } catch { /* keep waiting */ }
+  const isNew = latestData && latestData.generatedAt &&
+    latestData.generatedAt !== runState.baselineGen &&
+    new Date(latestData.generatedAt).getTime() > runState.dispatchAt - 120000;
+  if (isNew) { finishRun(latestData); return; }
+
+  // With a token, read the run's status for nicer messaging + failure/no-op detection.
+  let completed = false, failedConclusion = null;
+  if (gh.has()) {
+    try {
+      const r = await fetch(`https://api.github.com/repos/${REPO}/actions/workflows/triage.yml/runs?per_page=5&event=workflow_dispatch`, { headers: gh.headers() });
+      if (r.ok) {
+        const runs = (await r.json()).workflow_runs || [];
+        const mine = runs.find((x) => new Date(x.created_at).getTime() > runState.dispatchAt - 60000);
+        if (mine) {
+          runState.runUrl = mine.html_url;
+          if (mine.status === "completed") { completed = true; if (mine.conclusion !== "success") failedConclusion = mine.conclusion; }
+          else setRunStatus({ spinning: true, text: mine.status === "queued" ? "Queued…" : "Triage is running…", sub: `Elapsed ${elapsed}s · usually ~2 min.`, runUrl: mine.html_url, showCheck: true });
+        }
+      }
+    } catch { /* ignore */ }
+  }
+
+  if (failedConclusion) {
+    runState.done = true; stopRunPolling();
+    setRunStatus({ spinning: false, error: true, text: `Run ${failedConclusion}`, sub: "The workflow didn't finish cleanly — open the log for details.", runUrl: runState.runUrl });
     return;
   }
-  const btn = $("triggerBtn"), old = btn.textContent;
-  btn.disabled = true; btn.textContent = "Dispatching…";
-  try {
-    await ghDispatch("triage.yml", { force: "true" });
-    toast("Triage started — new drafts land in ~2 min");
-    setTimeout(() => loadAll({ soft: true }), 90000);
-  } catch (e) { handleGhError(e); }
-  finally { btn.disabled = false; btn.textContent = old; }
+  if (completed) { // finished, but latest.json didn't change → no new drafts
+    runState.done = true; stopRunPolling();
+    setRunStatus({ spinning: false, done: true, text: "Run finished — no new drafts", sub: "No new comments since the last run, or nothing changed.", runUrl: runState.runUrl });
+    return;
+  }
+  if (!gh.has()) setRunStatus({ spinning: true, text: "Waiting for the run…", sub: `Elapsed ${elapsed}s · watching main for new drafts…`, showCheck: true });
+  if (elapsed > 360) { // give up auto-polling, leave it manual
+    stopRunPolling();
+    setRunStatus({ spinning: false, text: "Still waiting", sub: "This is taking longer than usual. Use ‘Check now’, or open the run log.", runUrl: runState.runUrl, showCheck: true });
+  }
+}
+
+function finishRun(data) {
+  runState.done = true; stopRunPolling();
+  const day = { date: data.date, generatedAt: data.generatedAt, items: buildItems(data), raw: data };
+  day.counts = countCats(day.items);
+  const idx = state.days.findIndex((d) => d.date === day.date);
+  if (idx >= 0) state.days[idx] = day; else state.days.push(day);
+  state.days.sort((a, b) => (a.date < b.date ? -1 : 1));
+  state.latest = data;
+  renderRunDrafts(day);
+}
+
+function renderRunDrafts(day) {
+  $("runTitle").textContent = `Run ${fmtDayLabel(day.date)}`;
+  const pending = ((state.latest && state.latest.jobs) || []).length;
+  setRunStatus({ spinning: false, done: true, text: "Run complete", sub: `${day.items.length} comment${day.items.length === 1 ? "" : "s"} triaged · ${pending} draft${pending === 1 ? "" : "s"} now waiting in the Figma plugin.`, runUrl: runState && runState.runUrl });
+
+  const tiles = $("runTiles");
+  tiles.style.display = "";
+  tiles.replaceChildren();
+  const tile = (label, cat) => el("div", { class: "tile" },
+    el("div", { class: "label", text: label }),
+    el("div", { class: "value" }, el("span", { class: "catmark", style: `background:${CAT_COLOR(cat)}` }), String(day.counts[cat] || 0)));
+  tiles.append(tile("Mechanical", "mechanical"), tile("Creative", "creative"), tile("Needs input", "clarification"), tile("Skipped", "not_for_ahmed"));
+
+  const inbox = $("runInbox");
+  inbox.replaceChildren();
+  if (!day.items.length) {
+    inbox.append(el("div", { class: "empty" }, el("span", { class: "big", text: "✅" }), "This run produced no drafts and no open questions."));
+    return;
+  }
+  const byFile = new Map();
+  for (const it of day.items) { if (!byFile.has(it.fileName)) byFile.set(it.fileName, []); byFile.get(it.fileName).push(it); }
+  for (const [fileName, group] of byFile) {
+    const key = group.find((g) => g.fileKey)?.fileKey;
+    const wrap = el("div", { class: "filegroup" },
+      el("div", { class: "ghead" },
+        el("h3", { text: fileName }),
+        el("span", { class: "n", text: `${group.length} comment${group.length === 1 ? "" : "s"}` }),
+        key ? el("a", { href: `https://www.figma.com/design/${encodeURIComponent(key)}/`, target: "_blank", rel: "noopener", style: "font-size:12px" }, "open file ↗") : null));
+    for (const it of group) wrap.append(renderItem(it, { showRunTag: false }));
+    inbox.append(wrap);
+  }
 }
 
 async function clarifyComment(item, text) {
@@ -1350,7 +1517,8 @@ window.addEventListener("resize", () => {
 });
 setInterval(() => loadAll({ soft: true }), 5 * 60 * 1000);
 
-$("triggerBtn").addEventListener("click", runTriage);
+$("triggerBtn").addEventListener("click", startTriageRun);
+$("runBack").addEventListener("click", exitRunView);
 
 initTheme();
 initGh();

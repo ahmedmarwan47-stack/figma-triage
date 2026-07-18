@@ -1,6 +1,174 @@
 {
   "date": "2026-07-18",
-  "generatedAt": "2026-07-18T13:09:34.187Z",
-  "jobs": [],
-  "report": []
+  "generatedAt": "2026-07-18T13:25:26.682Z",
+  "jobs": [
+    {
+      "commentId": "1848540162",
+      "fileKey": "PlPSqmNnF1SEaZZn975sSz",
+      "fileName": "Wellth",
+      "nodeId": "40:723",
+      "imageUrl": "https://figma-alpha-api.s3.us-west-2.amazonaws.com/images/fc3b875c-a9d5-4f2f-87a8-653e88670cce",
+      "category": "creative",
+      "commentText": "this should be a gallery of photos @Ahmed Marwan",
+      "link": "https://www.figma.com/design/PlPSqmNnF1SEaZZn975sSz/?node-id=40%3A723",
+      "job": null,
+      "options": [
+        {
+          "label": "Grid Gallery",
+          "caption": "Replaced the stacked Brand Intro / Interior Image blocks with a uniform auto-layout grid of photo tiles, dropping the paired captions in favor of a clean visual wall.",
+          "ops": [],
+          "aiPrompt": "In the 'landing page - claude' frame, rebuild the Brand Intro section (the frames currently named 'Brand Intro') into a single auto-layout gallery: a 3-column, evenly-gapped grid of image tiles using auto layout on both the grid frame and each row, reusing the existing photos from the 'Interior Image' frames. Remove the 'Just For You' and 'Curated Dining' captions or demote them to a small caption row beneath the grid using the Body/l or Label/eyebrow text style. Keep every node inside auto layout — no free-floating tiles."
+        },
+        {
+          "label": "Horizontal Carousel Gallery",
+          "caption": "Turned the same photos into a horizontally scrollable carousel strip, better suited to showing more images without lengthening the page.",
+          "ops": [],
+          "aiPrompt": "In the 'landing page - claude' frame, replace the Brand Intro section with a horizontal-scrolling auto-layout carousel of the existing interior photos (from the 'Interior Image' frames), fixed row height, consistent gap, auto layout on the row with horizontal scroll enabled. Keep captions like 'Just For You' and 'Curated Dining' as small overlay labels using an existing Label/eyebrow text style and a Tone paint style for the label color, not hardcoded values."
+        },
+        {
+          "label": "Editorial Masonry Gallery",
+          "caption": "Mixed large and small tiles in a masonry arrangement to keep the quiet-luxury editorial feel while still reading clearly as a photo gallery.",
+          "ops": [],
+          "aiPrompt": "In the 'landing page - claude' frame, rework the Brand Intro section into an editorial masonry gallery: one large hero photo tile plus 2-3 smaller supporting tiles per row, all inside nested auto-layout frames (no absolute positioning), using the existing interior photography. Keep the 'Just For You' / 'Curated Dining' text as small eyebrow-style captions under their respective tiles, using an existing Label/eyebrow text style and a Tone/900 or similar local text color style — no hardcoded hex or px."
+        }
+      ]
+    },
+    {
+      "commentId": "1848539806",
+      "fileKey": "PlPSqmNnF1SEaZZn975sSz",
+      "fileName": "Wellth",
+      "nodeId": "40:723",
+      "imageUrl": "https://figma-alpha-api.s3.us-west-2.amazonaws.com/images/f4be155f-291a-4e66-912d-5a00ab81eaac",
+      "category": "creative",
+      "commentText": "this instance of a component set I like the swapping effect but I need the \"enquire now\" box to be in the center on the left not the bottom",
+      "link": "https://www.figma.com/design/PlPSqmNnF1SEaZZn975sSz/?node-id=40%3A723",
+      "job": null,
+      "options": [
+        {
+          "label": "Center-align in place",
+          "caption": "Kept the Hero Form inside its current auto-layout stack but switched the parent's vertical alignment from bottom to center, so the Enquire Now box sits mid-height without disturbing horizontal position or the swap effect.",
+          "ops": [],
+          "aiPrompt": "In the 'Brand Intro' instance containing the Hero Form (the 'ENQUIRE NOW' button), select the auto-layout parent that wraps Hero Form and change its vertical alignment (align-items) from bottom to center. Keep horizontal alignment as left and don't change child order, so the swap/variant effect on Hero Form still works."
+        },
+        {
+          "label": "Left-anchored two-column split",
+          "caption": "Rebuilt the hero as two auto-layout columns — imagery on the right, Hero Form vertically centered on the left — so the Enquire Now box reads as a deliberate anchor point instead of a floating footer element.",
+          "ops": [],
+          "aiPrompt": "Change the 'Brand Intro' instance's top-level auto-layout direction from vertical to horizontal with two children: a left column containing 'Hero Form' (auto layout, vertical alignment center, horizontal alignment left) and a right column containing the remaining hero imagery/content. Preserve existing local paint/text styles on all children."
+        },
+        {
+          "label": "Reorder within the stack",
+          "caption": "Moved Hero Form earlier in the layer order so it renders near the top/middle of the stack instead of last, giving a center-left position without introducing a new column structure.",
+          "ops": [],
+          "aiPrompt": "In the 'Brand Intro' instance, reorder 'Hero Form' so it appears before the other sibling frames in the auto-layout stack (instead of last), and set its own auto-layout alignment to vertical-center, horizontal-left. Leave the ENQUIRE NOW button's existing styles untouched."
+        }
+      ]
+    }
+  ],
+  "report": [
+    {
+      "category": "creative",
+      "commentId": "1848540162",
+      "file": "Wellth",
+      "fileKey": "PlPSqmNnF1SEaZZn975sSz",
+      "author": "Ahmed Marwan",
+      "comment": "this should be a gallery of photos @Ahmed Marwan",
+      "rationale": "Converting the Brand Intro section into a 'gallery of photos' requires visual/layout judgment (grid vs carousel vs masonry, image count, hierarchy) that no single mechanical op can express.",
+      "jobTitle": null,
+      "options": [
+        "Grid Gallery",
+        "Horizontal Carousel Gallery",
+        "Editorial Masonry Gallery"
+      ],
+      "reply": null
+    },
+    {
+      "category": "creative",
+      "commentId": "1848539806",
+      "file": "Wellth",
+      "fileKey": "PlPSqmNnF1SEaZZn975sSz",
+      "author": "Ahmed Marwan",
+      "comment": "this instance of a component set I like the swapping effect but I need the \"enquire now\" box to be in the center on the left not the bottom",
+      "rationale": "Clear intent (move the Enquire Now box from bottom to vertically-centered/left) but achieving it means restructuring auto-layout alignment/ordering inside the Brand Intro component — a layout judgment call with no move/align primitive in the op vocabulary, not a simple text/fill/style swap.",
+      "jobTitle": null,
+      "options": [
+        "Center-align in place",
+        "Left-anchored two-column split",
+        "Reorder within the stack"
+      ],
+      "reply": null
+    },
+    {
+      "category": "clarification",
+      "commentId": "1848538968",
+      "file": "Wellth",
+      "fileKey": "PlPSqmNnF1SEaZZn975sSz",
+      "author": "Ahmed Marwan",
+      "comment": "I need better layout of these photos @Ahmed Marwan",
+      "rationale": "Auto-triage failed for this one (claude exited 1: ).",
+      "jobTitle": null,
+      "options": [],
+      "reply": "I couldn't auto-triage this one — flagging it for a manual look."
+    },
+    {
+      "category": "clarification",
+      "commentId": "1848538698",
+      "file": "Wellth",
+      "fileKey": "PlPSqmNnF1SEaZZn975sSz",
+      "author": "Ahmed Marwan",
+      "comment": "and this black gradient overlay should follow the same style as the section below @Ahmed Marwan",
+      "rationale": "Auto-triage failed for this one (claude exited 1: ).",
+      "jobTitle": null,
+      "options": [],
+      "reply": "I couldn't auto-triage this one — flagging it for a manual look."
+    },
+    {
+      "category": "clarification",
+      "commentId": "1848538272",
+      "file": "Wellth",
+      "fileKey": "PlPSqmNnF1SEaZZn975sSz",
+      "author": "Ahmed Marwan",
+      "comment": "This section needs to in light mode @Ahmed Marwan",
+      "rationale": "Auto-triage failed for this one (claude exited 1: ).",
+      "jobTitle": null,
+      "options": [],
+      "reply": "I couldn't auto-triage this one — flagging it for a manual look."
+    },
+    {
+      "category": "clarification",
+      "commentId": "1848537785",
+      "file": "Wellth",
+      "fileKey": "PlPSqmNnF1SEaZZn975sSz",
+      "author": "Ahmed Marwan",
+      "comment": "I want this section redesigned",
+      "rationale": "Auto-triage failed for this one (claude exited 1: ).",
+      "jobTitle": null,
+      "options": [],
+      "reply": "I couldn't auto-triage this one — flagging it for a manual look."
+    },
+    {
+      "category": "clarification",
+      "commentId": "1848537542",
+      "file": "Wellth",
+      "fileKey": "PlPSqmNnF1SEaZZn975sSz",
+      "author": "Ahmed Marwan",
+      "comment": "I want to add another statement placed in a nice way \"Mountain VIew Hospitality\" @Ahmed Marwan",
+      "rationale": "Auto-triage failed for this one (claude exited 1: ).",
+      "jobTitle": null,
+      "options": [],
+      "reply": "I couldn't auto-triage this one — flagging it for a manual look."
+    },
+    {
+      "category": "clarification",
+      "commentId": "1848536539",
+      "file": "Wellth",
+      "fileKey": "PlPSqmNnF1SEaZZn975sSz",
+      "author": "Ahmed Marwan",
+      "comment": "I like the effect but I need the photos to be a little bit bigger @Ahmed Marwan",
+      "rationale": "Auto-triage failed for this one (claude exited 1: ).",
+      "jobTitle": null,
+      "options": [],
+      "reply": "I couldn't auto-triage this one — flagging it for a manual look."
+    }
+  ]
 }

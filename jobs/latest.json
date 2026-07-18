@@ -1,51 +1,6 @@
 {
   "date": "2026-07-18",
-  "generatedAt": "2026-07-18T00:05:54.466Z",
-  "jobs": [
-    {
-      "commentId": "1848538272",
-      "fileKey": "PlPSqmNnF1SEaZZn975sSz",
-      "fileName": "Wellth",
-      "nodeId": "40:723",
-      "imageUrl": "https://figma-alpha-api.s3.us-west-2.amazonaws.com/images/b251aa95-e798-4ebb-9cba-4de78a372409",
-      "category": "mechanical",
-      "commentText": "This section needs to in light mode @Ahmed Marwan",
-      "link": "https://www.figma.com/design/PlPSqmNnF1SEaZZn975sSz/?node-id=40%3A723",
-      "job": {
-        "title": "Switch Brand Intro section to light mode (Tone/50 bg, Navy/900 heading)",
-        "targetNodeId": "40:723",
-        "ops": [
-          {
-            "op": "duplicateTarget"
-          },
-          {
-            "op": "setFillStyle",
-            "match": "Brand Intro",
-            "styleName": "Tone/50"
-          },
-          {
-            "op": "setTextStyle",
-            "match": "A New Standard of Living",
-            "textStyleName": null,
-            "colorStyleName": "Navy/900"
-          }
-        ]
-      },
-      "options": null
-    }
-  ],
-  "report": [
-    {
-      "category": "mechanical",
-      "commentId": "1848538272",
-      "file": "Wellth",
-      "fileKey": "PlPSqmNnF1SEaZZn975sSz",
-      "author": "Ahmed Marwan",
-      "comment": "This section needs to in light mode @Ahmed Marwan",
-      "rationale": "Ahmed gave explicit direct instructions in the thread specifying exact styles to apply, with no room for creative options.",
-      "jobTitle": "Switch Brand Intro section to light mode (Tone/50 bg, Navy/900 heading)",
-      "options": [],
-      "reply": null
-    }
-  ]
+  "generatedAt": "2026-07-18T12:44:35.698Z",
+  "jobs": [],
+  "report": []
 }

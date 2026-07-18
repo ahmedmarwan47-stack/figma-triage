@@ -26,8 +26,12 @@
     --good: #0ca30c;
     --shadow: 0 1px 2px rgba(11,11,11,.04), 0 4px 14px rgba(11,11,11,.05);
   }
+  /* Dark palette: applied by the OS setting UNLESS the viewer forced light,
+     and always when the viewer forced dark. The toggle stamps data-theme on
+     :root and must win over the OS both ways. */
   @media (prefers-color-scheme: dark) {
-    :root {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
       --page: #0d0d0d;
       --surface: #1a1a19;
       --ink: #ffffff;
@@ -44,6 +48,24 @@
       --shadow: none;
     }
   }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --ink: #ffffff;
+    --ink-2: #c3c2b7;
+    --muted: #898781;
+    --grid: #2c2c2a;
+    --baseline: #383835;
+    --border: rgba(255, 255, 255, 0.10);
+    --accent: #3987e5;
+    --cat-mechanical: #3987e5;
+    --cat-creative: #008300;
+    --cat-clarification: #d55181;
+    --cat-not_for_ahmed: #c98500;
+    --shadow: none;
+  }
+  :root[data-theme="light"] { color-scheme: light; }
 
   * { box-sizing: border-box; }
   html, body { margin: 0; }
@@ -85,6 +107,22 @@
   .btn.primary:hover { filter: brightness(1.06); }
   .btn.small { padding: 3px 9px; font-size: 12px; border-radius: 7px; }
   .btn:disabled { opacity: .5; cursor: default; }
+  .btn.icon { padding: 5px 8px; }
+
+  /* theme toggle — a compact segmented switch */
+  .themetoggle {
+    display: inline-flex; align-items: center; gap: 2px;
+    border: 1px solid var(--border); border-radius: 999px;
+    background: var(--surface); padding: 2px;
+  }
+  .themetoggle button {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 24px; border: 0; border-radius: 999px;
+    background: transparent; color: var(--muted); cursor: pointer;
+    font-size: 13px; line-height: 1;
+  }
+  .themetoggle button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+  .themetoggle button:hover:not([aria-pressed="true"]) { color: var(--ink); }
 
   /* ---------- status strip ---------- */
   .statusstrip { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 18px; align-items: center; }
@@ -244,6 +282,41 @@
   footer { margin-top: 34px; font-size: 12.5px; color: var(--muted); line-height: 1.7; }
   footer .cols { display: flex; gap: 28px; flex-wrap: wrap; }
 
+  /* connect-GitHub dialog */
+  dialog.gh {
+    border: 1px solid var(--border); border-radius: 14px; padding: 0;
+    background: var(--surface); color: var(--ink);
+    max-width: 470px; width: calc(100% - 32px);
+    box-shadow: 0 16px 54px rgba(0,0,0,.30);
+  }
+  dialog.gh::backdrop { background: rgba(0,0,0,.42); }
+  .gh .ghhead { padding: 16px 18px 0; }
+  .gh h2 { margin: 0; font-size: 15px; font-weight: 640; }
+  .gh .ghbody { padding: 10px 18px 16px; font-size: 13px; color: var(--ink-2); }
+  .gh .ghbody p { margin: 8px 0; }
+  .gh label { display: block; font-weight: 570; color: var(--ink); margin: 12px 0 5px; font-size: 12.5px; }
+  .gh input[type=password], .gh input[type=text] {
+    width: 100%; font: inherit; font-size: 13px; padding: 7px 9px;
+    border: 1px solid var(--border); border-radius: 8px; background: var(--page); color: var(--ink);
+  }
+  .gh ol { margin: 4px 0 0; padding-left: 20px; }
+  .gh li { margin: 3px 0; }
+  .gh .note { color: var(--ink); background: var(--page); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
+  .gh .ghfoot { display: flex; gap: 8px; justify-content: flex-end; padding: 4px 18px 16px; }
+  .gh .status { font-size: 12px; }
+  .gh .status.ok { color: var(--good); }
+  #ghBtn.connected { border-color: color-mix(in srgb, var(--good) 55%, var(--border)); }
+  #ghBtn.connected::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--good); display: inline-block; margin-right: 2px; }
+
+  /* per-comment reply / clarify composer */
+  .composer { margin-top: 8px; border: 1px solid var(--border); border-radius: 10px; background: var(--page); padding: 10px; display: none; }
+  .composer.open { display: block; }
+  .composer textarea {
+    width: 100%; min-height: 58px; font: inherit; font-size: 13px; padding: 8px;
+    border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--ink); resize: vertical;
+  }
+  .composer .crow { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; align-items: center; }
+
   #toast {
     position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%) translateY(8px);
     background: var(--ink); color: var(--page);
@@ -276,8 +349,14 @@
     <span class="sub">comment triage → drafted edits → one-click apply</span>
     <span class="spacer"></span>
     <span class="pill" id="sourcePill" title="Where this page is reading data from"><span class="dot"></span><span id="sourceText">loading…</span></span>
+    <div class="themetoggle" role="group" aria-label="Theme">
+      <button id="themeSystem" title="Match system" aria-pressed="false">◐</button>
+      <button id="themeLight" title="Light" aria-pressed="false">☀</button>
+      <button id="themeDark" title="Dark" aria-pressed="false">☾</button>
+    </div>
+    <button class="btn" id="ghBtn" title="Connect GitHub for one-click actions">Connect GitHub</button>
     <button class="btn" id="refreshBtn" title="Re-fetch all data">↻ Refresh</button>
-    <a class="btn primary" id="triggerLink" target="_blank" rel="noopener" href="#">Run triage now ↗</a>
+    <button class="btn primary" id="triggerBtn" title="Run the triage workflow now">Run triage now</button>
   </div>
 
   <div class="statusstrip fade" id="statusStrip"></div>
@@ -317,9 +396,10 @@
         (it reads <code>jobs/latest.json</code>). This page is read-only.
       </div>
       <div>
-        <b style="color:var(--ink-2)">Clarifications</b><br />
-        Reply in the Slack thread to clarify to Claude (auto re-triage),<br />
-        or reply <code>figma: your text</code> to post it into the Figma comment thread.
+        <b style="color:var(--ink-2)">Reply / clarify</b><br />
+        On each comment: <b>Send to Claude</b> re-triages it with your note;
+        <b>Post in Figma</b> replies as you in the thread. Needs GitHub connected
+        (falls back to copy + Slack/Figma otherwise). The Slack thread still works too.
       </div>
       <div>
         <b style="color:var(--ink-2)">Links</b><br />
@@ -329,6 +409,31 @@
     </div>
   </footer>
 </div>
+
+<dialog class="gh" id="ghDialog" aria-label="Connect GitHub">
+  <div class="ghhead"><h2>Connect GitHub for live actions</h2></div>
+  <div class="ghbody">
+    <p class="note" id="ghNote" style="display:none"></p>
+    <p>Run triage, send clarifications to Claude, and post Figma replies straight from this page.
+       Paste a GitHub token — it's saved <b>only in this browser</b> and sent nowhere but github.com.
+       Do this once per device you use; on a shared computer, remove it when done.</p>
+    <p style="margin-bottom:2px"><b>Create one</b> (~30&nbsp;s):</p>
+    <ol>
+      <li><a id="ghTokenLink" target="_blank" rel="noopener" href="#">Open GitHub → generate a fine-grained token ↗</a></li>
+      <li>Repository access → <b>Only select repositories</b> → this repo.</li>
+      <li>Permissions → <b>Actions: Read and write</b> + <b>Contents: Read and write</b>.</li>
+      <li>Generate, copy, paste below.</li>
+    </ol>
+    <label for="ghTokenInput">GitHub token</label>
+    <input id="ghTokenInput" type="password" placeholder="github_pat_… (or ghp_…)" autocomplete="off" spellcheck="false" />
+    <p class="status" id="ghStatus" style="margin-top:8px"></p>
+  </div>
+  <div class="ghfoot">
+    <button class="btn" id="ghClearBtn" style="display:none">Remove token</button>
+    <button class="btn" id="ghCloseBtn">Close</button>
+    <button class="btn primary" id="ghSaveBtn">Save</button>
+  </div>
+</dialog>
 
 <div id="toast" role="status"></div>
 
@@ -354,6 +459,179 @@ const CAT_COLOR = (id) => `var(--cat-${id})`;
 /* ============================== tiny DOM helpers ============================== */
 
 const $ = (id) => document.getElementById(id);
+
+/* ============================== theme toggle ============================== */
+
+const THEME_KEY = "figma-triage-theme"; // "system" | "light" | "dark"
+function applyTheme(mode) {
+  const root = document.documentElement;
+  if (mode === "light" || mode === "dark") root.setAttribute("data-theme", mode);
+  else root.removeAttribute("data-theme");
+  try { localStorage.setItem(THEME_KEY, mode); } catch { /* private mode */ }
+  for (const [id, m] of [["themeSystem", "system"], ["themeLight", "light"], ["themeDark", "dark"]]) {
+    const b = document.getElementById(id);
+    if (b) b.setAttribute("aria-pressed", String(m === mode));
+  }
+}
+function initTheme() {
+  let saved = "system";
+  try { saved = localStorage.getItem(THEME_KEY) || "system"; } catch { /* ignore */ }
+  applyTheme(saved);
+  $("themeSystem").addEventListener("click", () => applyTheme("system"));
+  $("themeLight").addEventListener("click", () => applyTheme("light"));
+  $("themeDark").addEventListener("click", () => applyTheme("dark"));
+}
+
+/* ============================== GitHub live actions ============================== */
+// Static pages can't hold secrets, so authenticated actions (dispatch a
+// workflow, write a clarification file) use a GitHub token the user pastes
+// once — kept only in this browser's localStorage, scoped to this repo.
+// Figma replies go through a workflow so the Figma token stays server-side.
+// No token → each button falls back to GitHub's own UI, which works on any
+// machine the user is signed into.
+
+const GH_TOKEN_KEY = "figma-triage-gh-token";
+const gh = {
+  token() { try { return localStorage.getItem(GH_TOKEN_KEY) || ""; } catch { return ""; } },
+  set(t) { try { localStorage.setItem(GH_TOKEN_KEY, t); } catch { /* private mode */ } },
+  clear() { try { localStorage.removeItem(GH_TOKEN_KEY); } catch { /* ignore */ } },
+  has() { return !!gh.token(); },
+  headers() {
+    return {
+      Authorization: `Bearer ${gh.token()}`,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      "Content-Type": "application/json",
+    };
+  },
+};
+
+async function ghDispatch(workflowFile, inputs) {
+  const res = await fetch(`https://api.github.com/repos/${REPO}/actions/workflows/${workflowFile}/dispatches`, {
+    method: "POST", headers: gh.headers(), body: JSON.stringify({ ref: "main", inputs }),
+  });
+  if (res.status === 204) return;
+  throw new Error(`${res.status} ${res.statusText} ${await res.text().catch(() => "")}`.trim());
+}
+
+async function ghPutJson(path, obj, message) {
+  const url = `https://api.github.com/repos/${REPO}/contents/${path}`;
+  let sha;
+  try { const ex = await fetch(`${url}?ref=main`, { headers: gh.headers() }); if (ex.ok) sha = (await ex.json()).sha; } catch { /* new file */ }
+  const content = btoa(unescape(encodeURIComponent(JSON.stringify(obj, null, 2))));
+  const res = await fetch(url, {
+    method: "PUT", headers: gh.headers(),
+    body: JSON.stringify({ message, content, branch: "main", ...(sha ? { sha } : {}) }),
+  });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText} ${await res.text().catch(() => "")}`.trim());
+}
+
+function handleGhError(e) {
+  const m = String((e && e.message) || e);
+  if (/401|403|404|Bad credentials|Resource not accessible|Not Found/i.test(m)) {
+    openGhDialog("That token was rejected or is missing permissions. It needs Actions: Read/write and Contents: Read/write on this repo.");
+  } else {
+    toast("GitHub request failed");
+    console.error(e);
+  }
+}
+
+async function runTriage() {
+  if (!gh.has()) {
+    window.open(`https://github.com/${REPO}/actions/workflows/triage.yml`, "_blank", "noopener");
+    openGhDialog("Opened GitHub's own run page (works anywhere you're signed in). Connect a token to run it in one click from here.");
+    return;
+  }
+  const btn = $("triggerBtn"), old = btn.textContent;
+  btn.disabled = true; btn.textContent = "Dispatching…";
+  try {
+    await ghDispatch("triage.yml", { force: "true" });
+    toast("Triage started — new drafts land in ~2 min");
+    setTimeout(() => loadAll({ soft: true }), 90000);
+  } catch (e) { handleGhError(e); }
+  finally { btn.disabled = false; btn.textContent = old; }
+}
+
+async function clarifyComment(item, text) {
+  if (!item.commentId || !item.fileKey) { toast("This comment has no reference to re-triage"); return false; }
+  if (!gh.has()) {
+    await copyText(text, "Note");
+    openGhDialog("Connect a token to send this straight to Claude. For now it's copied — paste it into the Slack thread to re-triage.");
+    return false;
+  }
+  try {
+    const clar = { commentId: String(item.commentId), fileKey: item.fileKey, text, author: "Ahmed (dashboard)", ts: new Date().toISOString() };
+    await ghPutJson(`clarifications/${item.commentId}.json`, clar, `clarify: comment ${item.commentId} via dashboard`);
+    await ghDispatch("triage.yml", { force: "true" });
+    toast("Sent to Claude — re-triaging with your note");
+    setTimeout(() => loadAll({ soft: true }), 90000);
+    return true;
+  } catch (e) { handleGhError(e); return false; }
+}
+
+async function replyInFigma(item, text) {
+  if (!item.commentId || !item.fileKey) { toast("This comment has no Figma reference"); return false; }
+  if (!gh.has()) {
+    await copyText(text, "Reply");
+    if (item.link) window.open(item.link, "_blank", "noopener");
+    openGhDialog("Connect a token to post replies into Figma from here. For now it's copied and the thread is open — paste it in.");
+    return false;
+  }
+  try {
+    await ghDispatch("figma-reply.yml", { fileKey: item.fileKey, commentId: String(item.commentId), message: text });
+    toast("Posting your reply in the Figma thread…");
+    return true;
+  } catch (e) { handleGhError(e); return false; }
+}
+
+function renderGhButton() {
+  const b = $("ghBtn");
+  if (gh.has()) { b.textContent = "GitHub connected"; b.classList.add("connected"); b.title = "Live actions enabled in this browser — click to manage"; }
+  else { b.textContent = "Connect GitHub"; b.classList.remove("connected"); b.title = "Paste a scoped GitHub token for one-click actions"; }
+}
+
+function openGhDialog(note) {
+  const d = $("ghDialog");
+  const noteEl = $("ghNote");
+  noteEl.textContent = note || "";
+  noteEl.style.display = note ? "block" : "none";
+  $("ghTokenInput").value = "";
+  $("ghStatus").textContent = gh.has() ? "Connected in this browser." : "Not connected.";
+  $("ghStatus").className = "status" + (gh.has() ? " ok" : "");
+  $("ghClearBtn").style.display = gh.has() ? "inline-flex" : "none";
+  if (typeof d.showModal === "function") { if (!d.open) d.showModal(); } else { d.setAttribute("open", ""); }
+}
+
+function initGh() {
+  $("ghTokenLink").href = "https://github.com/settings/personal-access-tokens/new";
+  renderGhButton();
+  $("ghBtn").addEventListener("click", () => openGhDialog(""));
+  $("ghSaveBtn").addEventListener("click", () => {
+    const t = $("ghTokenInput").value.trim();
+    if (!t) { toast("Paste a token first"); return; }
+    gh.set(t); renderGhButton();
+    $("ghDialog").close?.();
+    toast("GitHub connected in this browser");
+  });
+  $("ghClearBtn").addEventListener("click", () => { gh.clear(); renderGhButton(); toast("Token removed"); openGhDialog(""); });
+  $("ghCloseBtn").addEventListener("click", () => $("ghDialog").close?.());
+}
+
+function buildComposer(item) {
+  const ta = el("textarea", { "aria-label": "Reply or clarification", placeholder: "Reply to post in the Figma thread — or a note to send Claude for a re-triage…" });
+  const send = (fn) => async () => {
+    const t = ta.value.trim();
+    if (!t) { toast("Type something first"); return; }
+    if (await fn(item, t)) ta.value = "";
+  };
+  return el("div", { class: "composer" },
+    ta,
+    el("div", { class: "crow" },
+      el("button", { class: "btn small primary", onclick: send(replyInFigma) }, "Post in Figma ↗"),
+      el("button", { class: "btn small", onclick: send(clarifyComment) }, "Send to Claude ↻"),
+      el("span", { class: "hint", text: "Post = reply as you in Figma · Send = re-triage with your note" }),
+    ));
+}
 function el(tag, attrs = {}, ...children) {
   const n = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
@@ -601,7 +879,6 @@ function renderHeader() {
   const pill = $("sourcePill");
   pill.classList.remove("err");
   $("sourceText").textContent = usedSource === "local" ? "reading local checkout" : "live · main branch";
-  $("triggerLink").href = `https://github.com/${REPO}/actions/workflows/triage.yml`;
   $("repoLink").href = `https://github.com/${REPO}`;
   $("actionsLink").href = `https://github.com/${REPO}/actions`;
 }
@@ -987,10 +1264,16 @@ function renderItem(it, { showRunTag }) {
     ));
   }
 
+  const composer = (it.commentId && it.fileKey) ? buildComposer(it) : null;
   const actions = el("div", { class: "itemactions" });
   if (it.link) actions.append(el("a", { class: "btn small", href: it.link, target: "_blank", rel: "noopener" }, "Open in Figma ↗"));
+  if (composer) actions.append(el("button", { class: "btn small", onclick: () => composer.classList.toggle("open") }, "Reply / clarify ▾"));
   if (it.commentId) actions.append(el("span", { class: "hint", text: `comment ${it.commentId}` }));
   if (actions.childNodes.length) body.append(actions);
+  if (composer) {
+    if (it.category === "clarification") composer.classList.add("open"); // that's where your input goes
+    body.append(composer);
+  }
 
   const card = el("div", { class: "card item" });
   if (it.imageUrl) {
@@ -1067,6 +1350,10 @@ window.addEventListener("resize", () => {
 });
 setInterval(() => loadAll({ soft: true }), 5 * 60 * 1000);
 
+$("triggerBtn").addEventListener("click", runTriage);
+
+initTheme();
+initGh();
 readHash();
 loadAll();
 </script>

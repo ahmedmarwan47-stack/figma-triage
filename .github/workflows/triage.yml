@@ -25,9 +25,12 @@ on:
         type: string
         default: ""
 
-# Needed to commit state.json + jobs/*.json back to the repo.
+# contents: commit state.json + jobs/*.json back to the repo.
+# actions:  dispatch the Pages deploy so the dashboard snapshot refreshes (a
+#           push by GITHUB_TOKEN doesn't trigger pages.yml's push event).
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: figma-triage
@@ -68,15 +71,30 @@ jobs:
         run: npm run triage
 
       - name: Commit state + jobs
+        id: commit
         run: |
           git config user.name "figma-triage-bot"
           git config user.email "bot@users.noreply.github.com"
           git add reporter/state.json jobs/ clarifications/
           if git diff --staged --quiet; then
             echo "No changes to commit."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             git commit -m "triage: $(date -u +%Y-%m-%d) run"
             # A clarification commit from the worker may have landed mid-run.
             git pull --rebase
             git push
+            echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
+
+      # The commit above is pushed with GITHUB_TOKEN, so it does NOT fire
+      # pages.yml's `push` trigger — the deployed dashboard would keep serving
+      # the old jobs snapshot. Dispatch the Pages deploy explicitly so the
+      # snapshot refreshes. (workflow_dispatch IS allowed to be triggered by
+      # GITHUB_TOKEN.) The dashboard also reads raw main first on Pages, so it's
+      # already fresh; this keeps the baked snapshot fallback current too.
+      - name: Refresh dashboard (GitHub Pages)
+        if: steps.commit.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run pages.yml --ref main || echo "[warn] Pages dispatch failed (Pages may be disabled); dashboard still reads raw main."

@@ -963,13 +963,26 @@ async function copyText(text, label) {
 /* ============================== data fetching ============================== */
 
 const isHttp = /^https?:$/.test(location.protocol);
+const isLocalHost = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])$/.test(location.hostname);
 let usedSource = null; // "local" | "github"
 
+// Source order matters for freshness:
+// - Local dev server (localhost) → read the working checkout first (`../`), so
+//   you see uncommitted local edits.
+// - Remote host (GitHub Pages) → read main's raw source first. The Pages deploy
+//   bakes in a *snapshot* of jobs/, and triage runs commit via the Actions
+//   GITHUB_TOKEN — whose pushes don't trigger the Pages redeploy — so that
+//   snapshot lags behind main. Raw main is the source of truth; the stale
+//   same-origin snapshot is only a last-resort fallback.
+// - file:// (double-click) → no same-origin data, raw main only.
 async function fetchJSON(path, { optional = false } = {}) {
   const bust = `t=${Date.now()}`;
+  const sameOrigin = { url: `../${path}?${bust}`, src: "local" };
+  const rawMain = { url: `${RAW_BASE}/${path}?${bust}`, src: "github" };
   const tries = [];
-  if (isHttp) tries.push({ url: `../${path}?${bust}`, src: "local" });
-  tries.push({ url: `${RAW_BASE}/${path}?${bust}`, src: "github" });
+  if (isHttp && isLocalHost) tries.push(sameOrigin);
+  tries.push(rawMain);
+  if (isHttp && !isLocalHost) tries.push(sameOrigin);
   let lastErr = null;
   for (const t of tries) {
     try {

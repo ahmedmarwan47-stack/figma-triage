@@ -367,11 +367,62 @@
   .skiplink:focus { position: static; }
   .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
+  /* header action buttons are transparent to layout on desktop (direct flex
+     children of .topbar), and become a full-width wrapping group on mobile. */
+  .actions { display: contents; }
+
   @media (max-width: 780px) {
     .tiles { grid-template-columns: repeat(2, 1fr); }
     .item { flex-direction: column; }
     .item .thumb { width: 100%; }
-    .item .thumb img { max-height: 170px; }
+    .item .thumb img { max-height: 260px; }
+  }
+
+  /* ---------- phone layout ---------- */
+  @media (max-width: 620px) {
+    .wrap { padding: 16px 14px 56px; }
+    .topbar { gap: 8px; align-items: center; }
+    .topbar h1 { font-size: 21px; }
+    .topbar .sub { flex-basis: 100%; }
+
+    /* Bigger, thumb-friendly tap targets everywhere. */
+    .btn { padding: 9px 14px; font-size: 14px; border-radius: 10px; }
+    .btn.small { padding: 8px 12px; font-size: 13px; border-radius: 9px; }
+
+    /* Header actions: full-width stack, primary action first and prominent. */
+    .actions {
+      display: flex; flex-wrap: wrap; gap: 8px;
+      flex-basis: 100%; width: 100%; margin-top: 2px;
+    }
+    .actions .btn { flex: 1 1 calc(50% - 4px); justify-content: center; }
+    .actions .btn.primary { flex-basis: 100%; order: -1; padding: 12px 14px; font-size: 15px; }
+
+    .pill { order: 3; }
+    .themetoggle { margin-left: auto; }
+    .themetoggle button { width: 34px; height: 30px; font-size: 15px; }
+
+    /* One column for tiles and filters. */
+    .tiles { grid-template-columns: 1fr 1fr; gap: 10px; }
+    .tile .value { font-size: 26px; }
+    .filters { gap: 8px; }
+    .filters select, .filters input[type="search"] {
+      flex: 1 1 100%; width: 100%; padding: 10px 11px; font-size: 15px; border-radius: 10px;
+    }
+    .filters .chips { flex-basis: 100%; }
+    .catchip { padding: 7px 13px; font-size: 13.5px; }
+
+    /* Item actions wrap to full width so buttons are easy to hit. */
+    .item .thumb img { max-height: 380px; max-width: 100%; object-fit: contain; }
+    .itemactions { gap: 8px; }
+    .itemactions .btn, .item .btn { flex: 1 1 auto; justify-content: center; }
+
+    /* Run view + dialogs. */
+    .runhead { flex-wrap: wrap; gap: 8px; }
+    dialog.gh { width: calc(100% - 20px); max-width: none; }
+    .gh .ghfoot { flex-wrap: wrap; }
+    .gh .ghfoot .btn { flex: 1 1 auto; justify-content: center; padding: 11px 14px; }
+    .rangeopts .opt { padding: 11px 12px; }
+    .rangeopts input[type=date], .rangeopts .num { padding: 8px 9px; font-size: 14px; }
   }
 </style>
 </head>
@@ -389,10 +440,12 @@
       <button id="themeLight" title="Light" aria-pressed="false">☀</button>
       <button id="themeDark" title="Dark" aria-pressed="false">☾</button>
     </div>
-    <button class="btn" id="ghBtn" title="Connect GitHub for one-click actions">Connect GitHub</button>
-    <button class="btn" id="refreshBtn" title="Re-fetch all data">↻ Refresh</button>
-    <button class="btn" id="viewRunBtn" title="Open the latest triage run's drafts page — no new run" style="display:none">Last run ↗</button>
-    <button class="btn primary" id="triggerBtn" title="Run the triage workflow now">Run triage now</button>
+    <div class="actions">
+      <button class="btn" id="ghBtn" title="Connect GitHub for one-click actions">Connect GitHub</button>
+      <button class="btn" id="refreshBtn" title="Re-fetch all data">↻ Refresh</button>
+      <button class="btn" id="viewRunBtn" title="Open the latest triage run's drafts page — no new run" style="display:none">Last run ↗</button>
+      <button class="btn primary" id="triggerBtn" title="Run the triage workflow now">Run triage now</button>
+    </div>
   </div>
 
   <div id="dashView">
@@ -1095,8 +1148,8 @@ function buildItems(dayData) {
       fileName: r.file || (job && job.fileName) || "Unknown file",
       fileKey: r.fileKey || (job && job.fileKey) || null,
       commentId: r.commentId || (job && job.commentId) || null,
-      link: job ? job.link : null,
-      imageUrl: job ? job.imageUrl : null,
+      link: (job && job.link) || r.link || null,
+      imageUrl: (job && job.imageUrl) || r.imageUrl || null,
       ops: job && job.job ? job.job.ops || [] : null,
       options: job ? job.options : null,
       date: dayData.date,

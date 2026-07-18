@@ -50,6 +50,48 @@ would skip everything in between. It still writes `jobs/<date>.json` +
 button opens a small picker (Since last run / Today only / Today & yesterday /
 Last N days / Custom range) that fills these inputs.
 
+## Instant apply via Claude (attended mode + apply queue)
+The dashboard can hand edits to a **Claude executor** — a Claude session (or scheduled job)
+with the **Figma MCP** connected, which applies drafted ops onto the safe `Claude Comments`
+clone page **without Figma being open anywhere**. Rationale: a static page physically cannot
+write to Figma (REST has no design-write API; the Plugin API needs Figma open; the Figma MCP
+is OAuth-bound to a Claude runtime), so the dashboard *queues* and the executor *applies*.
+
+**Hand-off file: `jobs/apply-queue.json`** (written by the dashboard via the user's GitHub token):
+```json
+{ "attended": false,
+  "requests": { "<commentId>": {
+      "fileKey": "…", "category": "mechanical|creative", "optionIndex": null,
+      "optionLabel": null, "requestedAt": "ISO", "status": "queued|applied|failed",
+      "appliedAt": "ISO", "resultNodeId": "…", "error": null } } }
+```
+- **Dashboard**: header toggle **Attended/Unattended** (flips `attended`); mechanical cards get
+  **Apply via Claude ▸**; creative cards: pick a direction → **Apply via Claude ▸** (also records
+  the pick in `selections.json` so the plugin stays in sync). Status chips (⏳/✓/✕) come from this
+  file; **↻ Refresh** re-reads them.
+- **Attended semantics**: `attended: true` = the executor auto-applies EVERY mechanical draft in
+  `jobs/latest.json` without per-item requests (recording each in `requests` so nothing double-applies).
+  Creative always waits for a picked direction. `attended: false` = only explicit requests apply.
+
+**Executor protocol** (run from a Claude session with the Figma MCP, e.g. Claude Code on the web):
+1. `git pull`, read `jobs/apply-queue.json` + `jobs/latest.json`.
+2. Work list = all `status: "queued"` requests, plus (if `attended`) every mechanical job in
+   `latest.json` not yet in `requests`.
+3. Per item: load the `/figma-use` skill guidance, then via `use_figma` on the item's `fileKey`:
+   find-or-create the `Claude Comments` page, clone the target node (`nodeId` from `latest.json`)
+   into a labelled auto-layout wrapper, execute the ops (same vocabulary as `plugin/code.js
+   runOps` — setText via the canonical font-load recipe, setFillStyle/Color, setTextStyle,
+   removeNode, cloneNode+count, resizeNode, setLayout) against the clone. Creative: apply the
+   `optionIndex` direction's ops; if a direction has no ops, build it from the option caption/aiPrompt.
+4. Write back `status: "applied"` (+ `appliedAt`, `resultNodeId` = wrapper id) or `"failed"`
+   (+ `error`), commit + push `jobs/apply-queue.json` so the dashboard's Refresh shows it.
+5. NEVER edit original design nodes — clones on `Claude Comments` only, exactly like the plugin.
+
+The models involved: **drafting** (classification + ops) happens in the triage workflow via the
+`claude` CLI with no `--model` flag → the CLI's default model for the account. **Applying** is
+deterministic — the plugin executes ops with no model at all; the MCP executor's model only
+translates the already-drafted ops into Plugin API calls.
+
 ## Op vocabulary (MUST stay in sync in two places)
 Prompt in `reporter/llm.mjs` (what Claude may emit) ↔ interpreter in `plugin/code.js` (`runOps`, what executes):
 `duplicateTarget`, `setText`, `setFillStyle`, `setFillColor` (hex fallback when no local style fits), `setTextStyle` (textStyleName / colorStyleName independently optional), `removeNode`, `cloneNode` (`count` clones for galleries), `resizeNode` (`width`/`height` or `scale`), `setLayout` (auto-layout `mode` / `itemSpacing` / `layoutWrap` / `padding` — grid = HORIZONTAL + WRAP).

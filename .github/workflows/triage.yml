@@ -12,6 +12,18 @@ on:
         description: "Run now, ignoring the 2pm-Cairo / already-ran-today guards"
         type: boolean
         default: false
+      lookback_days:
+        description: "Scan the last N Cairo days (1 = today only, 2 = today + yesterday). Blank = default (since last run)."
+        type: string
+        default: ""
+      since:
+        description: "Start date YYYY-MM-DD (Cairo) or ISO timestamp. Overrides lookback_days. Blank = default."
+        type: string
+        default: ""
+      until:
+        description: "End date YYYY-MM-DD (Cairo) or ISO timestamp — whole day included. Blank = now."
+        type: string
+        default: ""
 
 # Needed to commit state.json + jobs/*.json back to the repo.
 permissions:
@@ -49,6 +61,10 @@ jobs:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
           FORCE_RUN: ${{ inputs.force && '1' || '' }}
+          # Ad-hoc date-range selection (blank on scheduled runs → default 24h).
+          TRIAGE_LOOKBACK_DAYS: ${{ inputs.lookback_days }}
+          TRIAGE_SINCE: ${{ inputs.since }}
+          TRIAGE_UNTIL: ${{ inputs.until }}
         run: npm run triage
 
       - name: Commit state + jobs

@@ -80,6 +80,102 @@ function cairoParts(tz, at = new Date()) {
   return { date, hour, weekday };
 }
 
+// Offset (ms) between `tz` wall-clock and UTC at instant `at`, i.e.
+// localWallClock - utc. Cairo in summer (UTC+3) → +3h. DST-correct because it
+// asks Intl what the wall clock actually reads at that instant.
+function tzOffsetMs(tz, at) {
+  const dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+  const p = Object.fromEntries(dtf.formatToParts(at).map((x) => [x.type, x.value]));
+  const hour = p.hour === "24" ? 0 : Number(p.hour);
+  const asUTC = Date.UTC(+p.year, +p.month - 1, +p.day, hour, +p.minute, +p.second);
+  return asUTC - at.getTime();
+}
+
+// Epoch ms of local (tz) midnight beginning `dateStr` (YYYY-MM-DD), shifted by
+// `dayShift` whole days. dayShift=1 gives the start of the *next* day, i.e. the
+// exclusive upper edge of `dateStr` when you want the whole day included.
+function localDayStartMs(tz, dateStr, dayShift = 0) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const guess = Date.UTC(y, m - 1, d + dayShift, 0, 0, 0);
+  const off = tzOffsetMs(tz, new Date(guess));
+  return guess - off;
+}
+
+// A single window edge from user input: a bare "YYYY-MM-DD" is read as a
+// tz-local day boundary (upper edges cover the whole day); anything else is
+// parsed as an ISO timestamp.
+function parseWindowEdge(val, tz, isUpper) {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(val)) {
+    return localDayStartMs(tz, val, isUpper ? 1 : 0);
+  }
+  const ms = Date.parse(val);
+  if (Number.isNaN(ms)) {
+    throw new Error(`Bad date "${val}" — use YYYY-MM-DD (Cairo) or an ISO timestamp.`);
+  }
+  return ms;
+}
+
+// Resolve the activity window to scan. Default (no env override) reproduces the
+// old behaviour: everything since the last run's cursor (or lookbackHoursFirstRun
+// on a fresh state), unbounded upper edge. Any of TRIAGE_LOOKBACK_DAYS /
+// TRIAGE_SINCE / TRIAGE_UNTIL switches to an explicit ad-hoc window: guards are
+// bypassed (like FORCE_RUN) and the state cursor is left untouched so the daily
+// cadence isn't disturbed by scanning older comments.
+//
+//   TRIAGE_LOOKBACK_DAYS=N  → the last N Cairo days (1 = today only,
+//                             2 = today + yesterday, …)
+//   TRIAGE_SINCE=YYYY-MM-DD  (or ISO)  → inclusive start; overrides lookback
+//   TRIAGE_UNTIL=YYYY-MM-DD  (or ISO)  → inclusive end (whole day); default now
+function resolveWindow(tz, now, defaultSinceTs) {
+  const sinceEnv = (process.env.TRIAGE_SINCE || "").trim();
+  const untilEnv = (process.env.TRIAGE_UNTIL || "").trim();
+  const daysEnv = (process.env.TRIAGE_LOOKBACK_DAYS || "").trim();
+
+  if (!sinceEnv && !untilEnv && !daysEnv) {
+    return { sinceTs: defaultSinceTs, untilTs: now.getTime(), custom: false, label: null };
+  }
+
+  const { date: today } = cairoParts(tz, now);
+  const labelParts = [];
+  let sinceTs = null;
+  let untilTs = now.getTime();
+
+  if (daysEnv) {
+    const n = Number(daysEnv);
+    if (!Number.isInteger(n) || n < 1) {
+      throw new Error(`TRIAGE_LOOKBACK_DAYS must be a positive integer, got "${daysEnv}".`);
+    }
+    sinceTs = localDayStartMs(tz, today, -(n - 1));
+    labelParts.push(n === 1 ? "today only" : `last ${n} days`);
+  }
+  if (sinceEnv) {
+    sinceTs = parseWindowEdge(sinceEnv, tz, false);
+    labelParts.push(`since ${sinceEnv}`);
+  }
+  if (untilEnv) {
+    untilTs = parseWindowEdge(untilEnv, tz, true);
+    labelParts.push(`until ${untilEnv}`);
+  }
+  if (sinceTs == null) sinceTs = 0; // until given alone → from the beginning
+
+  if (untilTs <= sinceTs) {
+    throw new Error(
+      `Empty date range: until ${new Date(untilTs).toISOString()} is not after ` +
+        `since ${new Date(sinceTs).toISOString()}.`,
+    );
+  }
+  return { sinceTs, untilTs, custom: true, label: labelParts.join(", ") };
+}
+
 // ---- comment threading + filtering -----------------------------------------
 
 function buildThreads(comments) {
@@ -329,9 +425,18 @@ async function main() {
   const now = new Date();
   const { date: today, hour, weekday } = cairoParts(tz, now);
 
+  // Default window: everything since the last run's cursor (or the first-run
+  // lookback on a fresh state). An explicit date range via env overrides this.
+  const defaultSinceTs = state.lastRunAt
+    ? Date.parse(state.lastRunAt)
+    : now.getTime() - (config.lookbackHoursFirstRun ?? 24) * 3600 * 1000;
+  const scanWindow = resolveWindow(tz, now, defaultSinceTs);
+  const CUSTOM_WINDOW = scanWindow.custom;
+
   // Fire only at the configured local hour (the UTC cron fires twice to bracket
-  // DST; this guard picks the right one). FORCE_RUN bypasses for manual runs.
-  if (!FORCE) {
+  // DST; this guard picks the right one). FORCE_RUN — and any explicit date
+  // range — bypasses for manual runs.
+  if (!FORCE && !CUSTOM_WINDOW) {
     if (["Sat", "Sun"].includes(weekday)) {
       console.log(`[skip] ${weekday} is a weekend in ${tz}.`);
       return;
@@ -353,9 +458,15 @@ async function main() {
   const handles = [myHandle, ...(config.figma.extraHandles ?? [])];
   console.log(`[triage] running as ${myHandle} for ${today}`);
 
-  const sinceTs = state.lastRunAt
-    ? Date.parse(state.lastRunAt)
-    : now.getTime() - (config.lookbackHoursFirstRun ?? 24) * 3600 * 1000;
+  if (CUSTOM_WINDOW) {
+    console.log(
+      `[triage] custom window (${scanWindow.label}): ` +
+        `${new Date(scanWindow.sinceTs).toISOString()} → ${new Date(scanWindow.untilTs).toISOString()} ` +
+        `— state cursor will NOT advance`,
+    );
+  } else {
+    console.log(`[triage] window: comments active since ${new Date(scanWindow.sinceTs).toISOString()}`);
+  }
 
   const files = await resolveFiles(token, {
     teamIds: config.figma.teamIds ?? [],
@@ -418,9 +529,13 @@ async function main() {
           config.figma.includeAllUnresolved ||
           mentionsUser(t, handles),
       )
-      .filter(
-        (t) => latestActivity(t) > sinceTs || clarifications.has(String(t.head.id)),
-      );
+      .filter((t) => {
+        const active = latestActivity(t);
+        return (
+          (active > scanWindow.sinceTs && active <= scanWindow.untilTs) ||
+          clarifications.has(String(t.head.id))
+        );
+      });
 
     for (const thread of threads) {
       const nodeId = thread.head.client_meta?.node_id ?? null;
@@ -593,15 +708,22 @@ async function main() {
   await writeFile(join(JOBS_DIR, `${today}.json`), JSON.stringify(payload, null, 2));
   await writeFile(join(JOBS_DIR, "latest.json"), JSON.stringify(payload, null, 2));
 
-  // Advance state (committed back by the Action).
-  await writeFile(
-    STATE_PATH,
-    JSON.stringify(
-      { lastRunAt: now.toISOString(), lastRunDate: today },
-      null,
-      2,
-    ) + "\n",
-  );
+  // Advance state (committed back by the Action) — but NOT for an ad-hoc date
+  // range. A custom window (e.g. re-scanning older comments) must not move the
+  // daily cadence cursor, or the next scheduled run would skip everything in
+  // between.
+  if (CUSTOM_WINDOW) {
+    console.log("[state] custom-window run — leaving state.json cursor untouched.");
+  } else {
+    await writeFile(
+      STATE_PATH,
+      JSON.stringify(
+        { lastRunAt: now.toISOString(), lastRunDate: today },
+        null,
+        2,
+      ) + "\n",
+    );
+  }
 
   console.log(
     `[done] ${jobs.length} apply-ready job(s); ` +

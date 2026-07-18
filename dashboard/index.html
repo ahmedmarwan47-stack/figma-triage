@@ -325,6 +325,21 @@
   .gh .ghfoot { display: flex; gap: 8px; justify-content: flex-end; padding: 4px 18px 16px; }
   .gh .status { font-size: 12px; }
   .gh .status.ok { color: var(--good); }
+  .rangeopts { margin: 6px 0 2px; }
+  .rangeopts .opt { display: flex; align-items: center; gap: 8px; margin: 0; padding: 8px 10px;
+    border: 1px solid var(--border); border-radius: 9px; font-weight: 500; color: var(--ink);
+    cursor: pointer; margin-top: 7px; }
+  .rangeopts .opt:first-child { margin-top: 0; }
+  .rangeopts .opt input[type=radio] { margin: 0; }
+  .rangeopts .opt b { font-weight: 600; }
+  .rangeopts .muted { color: var(--ink-2); font-weight: 400; }
+  .rangeopts .num, .rangeopts input[type=date] {
+    font: inherit; font-size: 12.5px; padding: 4px 7px; border: 1px solid var(--border);
+    border-radius: 7px; background: var(--page); color: var(--ink); }
+  .rangeopts .num { width: 58px; }
+  .rangeopts .customrow { display: none; gap: 12px; padding: 2px 10px 4px; flex-wrap: wrap; }
+  .rangeopts .customrow.show { display: flex; }
+  .rangeopts .customrow label { display: inline-flex; align-items: center; gap: 6px; margin: 6px 0; }
   #ghBtn.connected { border-color: color-mix(in srgb, var(--good) 55%, var(--border)); }
   #ghBtn.connected::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--good); display: inline-block; margin-right: 2px; }
 
@@ -376,6 +391,7 @@
     </div>
     <button class="btn" id="ghBtn" title="Connect GitHub for one-click actions">Connect GitHub</button>
     <button class="btn" id="refreshBtn" title="Re-fetch all data">↻ Refresh</button>
+    <button class="btn" id="viewRunBtn" title="Open the latest triage run's drafts page — no new run" style="display:none">Last run ↗</button>
     <button class="btn primary" id="triggerBtn" title="Run the triage workflow now">Run triage now</button>
   </div>
 
@@ -464,6 +480,33 @@
     <button class="btn" id="ghClearBtn" style="display:none">Remove token</button>
     <button class="btn" id="ghCloseBtn">Close</button>
     <button class="btn primary" id="ghSaveBtn">Save</button>
+  </div>
+</dialog>
+
+<dialog class="gh" id="rangeDialog" aria-label="Choose which comments to triage">
+  <div class="ghhead"><h2>Run triage — which comments?</h2></div>
+  <div class="ghbody">
+    <p>By default triage picks up comments since the last run (about the last 24&nbsp;hours). Pick a wider
+       range to re-scan older comments — an ad-hoc range doesn't move the daily cursor, so scheduled runs
+       are unaffected. Dates are in Cairo time.</p>
+    <div class="rangeopts" id="rangeOpts">
+      <label class="opt"><input type="radio" name="rangeMode" value="default" checked>
+        <span><b>Since last run</b> <span class="muted">— the default (~last 24h)</span></span></label>
+      <label class="opt"><input type="radio" name="rangeMode" value="today"> <b>Today only</b></label>
+      <label class="opt"><input type="radio" name="rangeMode" value="yesterday"> <b>Today &amp; yesterday</b></label>
+      <label class="opt"><input type="radio" name="rangeMode" value="days">
+        <span><b>Last</b> <input type="number" class="num" id="rangeDays" min="1" max="365" value="7"> <b>days</b></span></label>
+      <label class="opt"><input type="radio" name="rangeMode" value="custom"> <b>Custom range</b></label>
+      <div class="customrow" id="customRow">
+        <label>From <input type="date" id="rangeSince"></label>
+        <label>To <input type="date" id="rangeUntil"></label>
+      </div>
+    </div>
+    <p class="status" id="rangeNote"></p>
+  </div>
+  <div class="ghfoot">
+    <button class="btn" id="rangeCancelBtn">Cancel</button>
+    <button class="btn primary" id="rangeRunBtn">Run triage</button>
   </div>
 </dialog>
 
@@ -585,6 +628,18 @@ function exitRunView() {
   $("dashView").style.display = "";
   loadAll({ soft: true }); // reflect any new run in the dashboard
 }
+// Open the run page for an already-completed run — no new dispatch, no polling.
+// Lets you get back to the drafts view from the dashboard without re-triaging.
+function viewRun(day) {
+  if (!day || !day.items) { toast("No triage run to show yet"); return; }
+  stopRunPolling();
+  runState = { dispatchAt: Date.now(), baselineGen: null, timer: null, done: true, runUrl: null };
+  enterRunView();
+  renderRunDrafts(day);
+}
+function viewLatestRun() {
+  viewRun(state.days.length ? state.days[state.days.length - 1] : null);
+}
 function stopRunPolling() {
   if (runState && runState.timer) { clearInterval(runState.timer); runState.timer = null; }
 }
@@ -601,29 +656,88 @@ function setRunStatus({ spinning, text, sub, error, done, runUrl, showCheck }) {
   );
 }
 
-async function startTriageRun() {
+async function startTriageRun(dispatchInputs = { force: "true" }, label = "") {
   runState = { dispatchAt: Date.now(), baselineGen: (state.latest && state.latest.generatedAt) || null, timer: null, done: false, runUrl: null };
   enterRunView();
-  $("runTitle").textContent = "New triage run";
+  $("runTitle").textContent = label ? `New triage run — ${label}` : "New triage run";
   $("runTiles").style.display = "none";
   $("runInbox").replaceChildren();
   setRunStatus({ spinning: true, text: "Starting…" });
+  const scope = label ? ` (${label})` : "";
 
   if (gh.has()) {
     try {
-      await ghDispatch("triage.yml", { force: "true" });
+      await ghDispatch("triage.yml", dispatchInputs);
     } catch (e) {
       setRunStatus({ spinning: false, error: true, text: "Couldn't start the run", sub: String((e && e.message) || e), showCheck: false });
       handleGhError(e);
       return;
     }
-    setRunStatus({ spinning: true, text: "Triage is running…", sub: "Discovering comments and drafting edits — usually ~2 minutes.", showCheck: true });
+    setRunStatus({ spinning: true, text: "Triage is running…", sub: `Discovering comments${scope} and drafting edits — usually ~2 minutes.`, showCheck: true });
   } else {
     window.open(`https://github.com/${REPO}/actions/workflows/triage.yml`, "_blank", "noopener");
-    setRunStatus({ spinning: true, text: "Waiting for the run…", sub: "Click ‘Run workflow’ on the GitHub tab that opened. New drafts appear here automatically. (Connect a token to skip this step.)", showCheck: true });
+    setRunStatus({ spinning: true, text: "Waiting for the run…", sub: `Click ‘Run workflow’ on the GitHub tab that opened${label ? `, filling in the date range for ${label}` : ""}. New drafts appear here automatically. (Connect a token to skip this step.)`, showCheck: true });
   }
   runState.timer = setInterval(pollRun, 12000);
   setTimeout(pollRun, 8000);
+}
+
+/* ---- "Run triage now" → pick which comments (date range) before firing. ---- */
+
+function localDateStr(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function openRangeDialog() {
+  const d = $("rangeDialog");
+  const today = localDateStr(new Date());
+  const weekAgo = localDateStr(new Date(Date.now() - 6 * 864e5));
+  if (!$("rangeSince").value) $("rangeSince").value = weekAgo;
+  if (!$("rangeUntil").value) $("rangeUntil").value = today;
+  $("rangeNote").textContent = "";
+  if (typeof d.showModal === "function") { if (!d.open) d.showModal(); } else { d.setAttribute("open", ""); }
+}
+
+// Map the dialog selection to workflow_dispatch inputs + a human label.
+function readRangeSelection() {
+  const mode = (document.querySelector('input[name="rangeMode"]:checked') || {}).value || "default";
+  if (mode === "today") return { inputs: { force: "true", lookback_days: "1" }, label: "today only" };
+  if (mode === "yesterday") return { inputs: { force: "true", lookback_days: "2" }, label: "today & yesterday" };
+  if (mode === "days") {
+    const n = Math.max(1, Math.min(365, parseInt($("rangeDays").value, 10) || 0));
+    if (!n) return { error: "Enter a number of days (1 or more)." };
+    return { inputs: { force: "true", lookback_days: String(n) }, label: `last ${n} days` };
+  }
+  if (mode === "custom") {
+    const since = $("rangeSince").value, until = $("rangeUntil").value;
+    if (!since) return { error: "Pick a start date." };
+    if (until && until < since) return { error: "The end date is before the start date." };
+    const inputs = { force: "true", since };
+    if (until) inputs.until = until;
+    return { inputs, label: until ? `${since} → ${until}` : `since ${since}` };
+  }
+  return { inputs: { force: "true" }, label: "since last run" };
+}
+
+function initRangeDialog() {
+  $("triggerBtn").addEventListener("click", openRangeDialog);
+  $("rangeCancelBtn").addEventListener("click", () => $("rangeDialog").close?.());
+  const sync = () => {
+    const mode = (document.querySelector('input[name="rangeMode"]:checked') || {}).value;
+    $("customRow").classList.toggle("show", mode === "custom");
+  };
+  for (const r of document.querySelectorAll('input[name="rangeMode"]')) r.addEventListener("change", sync);
+  // Selecting the days/custom inputs implies their radio.
+  $("rangeDays").addEventListener("focus", () => { document.querySelector('input[name="rangeMode"][value="days"]').checked = true; sync(); });
+  for (const id of ["rangeSince", "rangeUntil"]) {
+    $(id).addEventListener("focus", () => { document.querySelector('input[name="rangeMode"][value="custom"]').checked = true; sync(); });
+  }
+  $("rangeRunBtn").addEventListener("click", () => {
+    const sel = readRangeSelection();
+    if (sel.error) { $("rangeNote").textContent = sel.error; return; }
+    $("rangeDialog").close?.();
+    startTriageRun(sel.inputs, sel.label);
+  });
 }
 
 async function pollRun() {
@@ -1495,6 +1609,7 @@ function renderAll() {
   renderChart();
   renderFilters();
   renderInbox();
+  $("viewRunBtn").style.display = state.days.length ? "" : "none";
 }
 
 $("refreshBtn").addEventListener("click", () => loadAll({ soft: true }));
@@ -1517,11 +1632,12 @@ window.addEventListener("resize", () => {
 });
 setInterval(() => loadAll({ soft: true }), 5 * 60 * 1000);
 
-$("triggerBtn").addEventListener("click", startTriageRun);
 $("runBack").addEventListener("click", exitRunView);
+$("viewRunBtn").addEventListener("click", viewLatestRun);
 
 initTheme();
 initGh();
+initRangeDialog();
 readHash();
 loadAll();
 </script>

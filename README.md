@@ -29,6 +29,27 @@ Claude triages each unresolved comment into exactly one category (prompt in `rep
 - **clarification** — truly ambiguous → posted to Slack as its own threadable "❓ Needs your input" message (bot transport only). Reply plain to clarify to Claude → auto re-triage; reply `figma: <text>` to post `<text>` into the Figma comment thread.
 - **not_for_ahmed** — flagged and skipped.
 
+## Which comments a run scans (date range)
+By default a run scans comments with activity **since the last run's cursor**
+(`reporter/state.json → lastRunAt`; ~24 h on a fresh state via
+`config.json → lookbackHoursFirstRun`) — the daily cadence. You can override the
+window for an on-demand run to re-scan **older** comments, via `workflow_dispatch`
+inputs on `triage.yml` (mapped to env vars read in `reporter/index.mjs →
+resolveWindow`):
+- **`lookback_days`** = N → the last N **Cairo** days (`1` = today only, `2` =
+  today + yesterday, …).
+- **`since`** / **`until`** = `YYYY-MM-DD` (Cairo, whole day inclusive) or an ISO
+  timestamp → an explicit range. `since` overrides `lookback_days`; `until` blank
+  means now. Locally: `TRIAGE_LOOKBACK_DAYS` / `TRIAGE_SINCE` / `TRIAGE_UNTIL`.
+
+Any of these **implies force** (bypasses the 2 pm-Cairo / already-ran-today
+guards) and, crucially, **does NOT advance `state.json`** — an ad-hoc scan of
+older comments must not move the daily cursor forward, or the next scheduled run
+would skip everything in between. It still writes `jobs/<date>.json` +
+`latest.json` so the drafts reach the plugin. The dashboard's **Run triage now**
+button opens a small picker (Since last run / Today only / Today & yesterday /
+Last N days / Custom range) that fills these inputs.
+
 ## Op vocabulary (MUST stay in sync in two places)
 Prompt in `reporter/llm.mjs` (what Claude may emit) ↔ interpreter in `plugin/code.js` (`runOps`, what executes):
 `duplicateTarget`, `setText`, `setFillStyle`, `setFillColor` (hex fallback when no local style fits), `setTextStyle` (textStyleName / colorStyleName independently optional), `removeNode`, `cloneNode`.
@@ -145,9 +166,14 @@ figma.includeAllUnresolved` is still `true` (test mode — flip to `false` for m
   dashboard + Pages deploy + live actions landed on `claude/dashboard-build-features-na7kfp`
   (PRs #1–#3, all merged). `main` is the source of truth — the plugin fetches `jobs/latest.json`
   from `main`'s raw URL, and GitHub Pages deploys `dashboard/` from `main`.
-- **Trigger a run:** the dashboard's **Run triage now** (with a token connected), or Actions →
-  "Figma comment triage" → Run workflow → force. To re-scan already-processed comments first reset `reporter/state.json` to `{ "lastRunAt": null, "lastRunDate": null }` (the run commits new state + jobs back — pull before continuing).
+- **Trigger a run:** the dashboard's **Run triage now** (with a token connected) — its picker also
+  chooses the date range — or Actions → "Figma comment triage" → Run workflow → force (with optional
+  `lookback_days` / `since` / `until`). To re-scan **older** comments prefer a date-range run (see
+  [Which comments a run scans](#which-comments-a-run-scans-date-range)) — it leaves `state.json`
+  untouched. Resetting `reporter/state.json` to `{ "lastRunAt": null, "lastRunDate": null }` still
+  works to rewind the daily cursor itself (the run commits new state + jobs back — pull before continuing).
 - **Local run:** `FORCE_RUN=1 FIGMA_TOKEN=… npm run triage` (prints digest to stdout without Slack vars).
+  Add `TRIAGE_LOOKBACK_DAYS=2` (or `TRIAGE_SINCE=…` / `TRIAGE_UNTIL=…`) to scan a specific date range.
 - **Plugin changes** must be re-imported by Ahmed in Figma desktop — send him `plugin/code.js` / `ui.html` after edits.
 - The user is Ahmed, a freelance web/UI designer (design principles are embedded in the `llm.mjs` system prompt: auto layout everywhere, styles by name never hex, 12px floor, first-person past-tense voice, banned buzzwords).
 
@@ -168,7 +194,9 @@ view over everything the pipeline publishes:
   marks what `latest.json` is currently serving to the plugin.
 - **Theme toggle** — System / Light / Dark, remembered per browser (stamps `data-theme`, wins
   over the OS setting both ways).
-- **Live actions** — a **Run triage now** button and, on every comment, a **Reply / clarify**
+- **Live actions** — a **Run triage now** button (opens a date-range picker — *Since last run* /
+  *Today only* / *Today & yesterday* / *Last N days* / *Custom range* — before dispatching) and, on
+  every comment, a **Reply / clarify**
   composer: *Send to Claude* re-triages that comment with your note (writes
   `clarifications/<id>.json` + dispatches the workflow, exactly like the Slack route);
   *Post in Figma* replies as you in the thread (via the `figma-reply.yml` workflow, so

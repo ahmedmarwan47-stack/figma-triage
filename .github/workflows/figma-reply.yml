@@ -1,0 +1,43 @@
+name: Post a Figma comment reply
+
+# Posts ONE reviewed reply into a Figma comment thread, as the owner of
+# FIGMA_TOKEN. Triggered from the dashboard's "Reply in Figma" button
+# (workflow_dispatch via the GitHub API) so the Figma token never leaves
+# the Actions secret store — the browser only ever holds the user's own
+# GitHub token. Mirrors the worker's `figma:` route.
+
+on:
+  workflow_dispatch:
+    inputs:
+      fileKey:
+        description: "Figma file key"
+        required: true
+        type: string
+      commentId:
+        description: "Comment id being replied to"
+        required: true
+        type: string
+      message:
+        description: "Reply text (already reviewed)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: figma-reply-${{ inputs.commentId }}
+  cancel-in-progress: false
+
+jobs:
+  reply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Post the reply
+        env:
+          FIGMA_TOKEN: ${{ secrets.FIGMA_TOKEN }}
+        run: node reporter/reply-figma.mjs "${{ inputs.fileKey }}" "${{ inputs.commentId }}" "${{ inputs.message }}"

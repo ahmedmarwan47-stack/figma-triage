@@ -134,15 +134,34 @@ view over everything the pipeline publishes:
 - **Inbox** — every triaged comment grouped by file, filterable by run / category / file / free
   text (filters sync to the URL hash, so views are shareable). Mechanical cards show the drafted
   ops as readable steps; creative cards show each direction with its op count and a
-  **Copy AI prompt** button; clarification cards show the drafted reply with a **Copy reply**
-  button and the two Slack answer routes. "Pending in plugin" marks what `latest.json` is
-  currently serving to the plugin.
+  **Copy AI prompt** button; clarification cards show the drafted reply. "Pending in plugin"
+  marks what `latest.json` is currently serving to the plugin.
+- **Theme toggle** — System / Light / Dark, remembered per browser (stamps `data-theme`, wins
+  over the OS setting both ways).
+- **Live actions** — a **Run triage now** button and, on every comment, a **Reply / clarify**
+  composer: *Send to Claude* re-triages that comment with your note (writes
+  `clarifications/<id>.json` + dispatches the workflow, exactly like the Slack route);
+  *Post in Figma* replies as you in the thread (via the `figma-reply.yml` workflow, so
+  `FIGMA_TOKEN` stays in Actions secrets). See **Live actions & auth** below.
 
 **How to open:** it works from anywhere — double-click the file (it then reads `main` via
 `raw.githubusercontent.com`), serve the repo root (`npx serve` / `python3 -m http.server` →
-`/dashboard/`, reads the local checkout), or enable GitHub Pages on `main` and bookmark
-`/dashboard/`. `?repo=owner/name` overrides the source repo. Applying drafts still happens
-only in the Figma plugin — the dashboard is deliberately read-only.
+`/dashboard/`, reads the local checkout), or use the deployed **GitHub Pages** site
+(`.github/workflows/pages.yml` publishes `dashboard/` + data to
+`https://<owner>.github.io/figma-triage/`; enable once via Settings → Pages → Source =
+GitHub Actions). `?repo=owner/name` overrides the source repo.
+
+### Live actions & auth
+A static page can't hold secrets, so the action buttons authenticate with a **GitHub token
+the user pastes once** ("Connect GitHub"), stored **only in that browser's localStorage**,
+scoped to this repo (fine-grained: *Actions* r/w + *Contents* r/w). With it connected:
+Run triage dispatches `triage.yml`; *Send to Claude* commits a clarification and re-triages;
+*Post in Figma* dispatches `figma-reply.yml` (which runs `reporter/reply-figma.mjs` with the
+repo's `FIGMA_TOKEN` — the Figma token never touches the browser). **Without a token**, each
+button falls back to GitHub's own UI / copy-to-clipboard, so the dashboard still works on any
+machine you're signed into GitHub on. Applying drafts still happens only in the Figma plugin.
+This collapses most of the un-deployed worker's job into the page; the Slack two-way loop
+still works in parallel if/when the worker is deployed.
 
 ## Post a drafted reply manually (gated)
 ```bash

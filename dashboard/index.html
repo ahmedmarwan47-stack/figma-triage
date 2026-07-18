@@ -391,6 +391,7 @@
     </div>
     <button class="btn" id="ghBtn" title="Connect GitHub for one-click actions">Connect GitHub</button>
     <button class="btn" id="refreshBtn" title="Re-fetch all data">↻ Refresh</button>
+    <button class="btn" id="viewRunBtn" title="Open the latest triage run's drafts page — no new run" style="display:none">Last run ↗</button>
     <button class="btn primary" id="triggerBtn" title="Run the triage workflow now">Run triage now</button>
   </div>
 
@@ -626,6 +627,18 @@ function exitRunView() {
   $("runView").hidden = true;
   $("dashView").style.display = "";
   loadAll({ soft: true }); // reflect any new run in the dashboard
+}
+// Open the run page for an already-completed run — no new dispatch, no polling.
+// Lets you get back to the drafts view from the dashboard without re-triaging.
+function viewRun(day) {
+  if (!day || !day.items) { toast("No triage run to show yet"); return; }
+  stopRunPolling();
+  runState = { dispatchAt: Date.now(), baselineGen: null, timer: null, done: true, runUrl: null };
+  enterRunView();
+  renderRunDrafts(day);
+}
+function viewLatestRun() {
+  viewRun(state.days.length ? state.days[state.days.length - 1] : null);
 }
 function stopRunPolling() {
   if (runState && runState.timer) { clearInterval(runState.timer); runState.timer = null; }
@@ -1596,6 +1609,7 @@ function renderAll() {
   renderChart();
   renderFilters();
   renderInbox();
+  $("viewRunBtn").style.display = state.days.length ? "" : "none";
 }
 
 $("refreshBtn").addEventListener("click", () => loadAll({ soft: true }));
@@ -1619,6 +1633,7 @@ window.addEventListener("resize", () => {
 setInterval(() => loadAll({ soft: true }), 5 * 60 * 1000);
 
 $("runBack").addEventListener("click", exitRunView);
+$("viewRunBtn").addEventListener("click", viewLatestRun);
 
 initTheme();
 initGh();

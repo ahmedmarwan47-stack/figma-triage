@@ -610,9 +610,11 @@ async function main() {
         commentId: thread.head.id,
         fileName: file.name,
         fileKey: file.key,
+        project: file.project ?? null,
         link: fileLink(file.key, nodeId),
         commentAuthor: thread.head.user?.handle ?? "someone",
         commentText: thread.head.message,
+        createdAt: thread.head.created_at ?? null,
         rationale: verdict.rationale ?? "",
         imageUrl,
         verdict,
@@ -627,10 +629,13 @@ async function main() {
           commentId: thread.head.id,
           fileKey: file.key,
           fileName: file.name,
+          project: file.project ?? null,
           nodeId,
           imageUrl,
           category,
           commentText: thread.head.message,
+          commentAuthor: thread.head.user?.handle ?? "someone",
+          createdAt: thread.head.created_at ?? null,
           link: fileLink(file.key, nodeId),
           job: verdict.job ?? null,
           options: verdict.options ?? null,
@@ -661,26 +666,37 @@ async function main() {
     buckets.creative.length +
     buckets.clarification.length;
 
+  // Slack is opt-in. When disabled (config.slack.enabled === false) we're in
+  // dashboard-only mode: still classify, draft, and write jobs/ below — just
+  // skip every Slack post. Default true keeps back-compat if the flag is absent.
+  const slackEnabled = config.slack?.enabled !== false;
   const botToken = process.env.SLACK_BOT_TOKEN;
   const channelId = process.env.SLACK_CHANNEL_ID;
   const botMode = !!(botToken && channelId);
 
-  const digestPayload =
-    totalActionable === 0 && buckets.not_for_ahmed.length === 0
-      ? `*Figma triage — ${today}*\nNo new mentions today.`
-      : formatDigest({
-          date: today,
-          buckets,
-          clarificationsInline: !botMode,
-        });
-  await sendDigest({ botMode, botToken, channelId, payload: digestPayload });
-  if (botMode) {
-    // Each clarification gets its OWN message carrying a ref marker. A thread
-    // reply on that message is routed back to the matching Figma comment by
-    // worker/ and consumed on the next run.
-    for (const it of buckets.clarification) {
-      await postSlackBot(botToken, channelId, formatClarificationMessage(it));
+  if (slackEnabled) {
+    const digestPayload =
+      totalActionable === 0 && buckets.not_for_ahmed.length === 0
+        ? `*Figma triage — ${today}*\nNo new mentions today.`
+        : formatDigest({
+            date: today,
+            buckets,
+            clarificationsInline: !botMode,
+          });
+    await sendDigest({ botMode, botToken, channelId, payload: digestPayload });
+    if (botMode) {
+      // Each clarification gets its OWN message carrying a ref marker. A thread
+      // reply on that message is routed back to the matching Figma comment by
+      // worker/ and consumed on the next run.
+      for (const it of buckets.clarification) {
+        await postSlackBot(botToken, channelId, formatClarificationMessage(it));
+      }
     }
+  } else {
+    console.log(
+      `[slack] disabled (config.slack.enabled=false) — dashboard-only. ` +
+        `${totalActionable} actionable item(s) written to jobs/, no Slack post.`,
+    );
   }
 
   // Full triage record (all categories, including the drafts that don't become
@@ -694,8 +710,10 @@ async function main() {
         commentId: it.commentId,
         file: it.fileName,
         fileKey: it.fileKey,
+        project: it.project ?? null,
         author: it.commentAuthor,
         comment: it.commentText,
+        createdAt: it.createdAt ?? null,
         rationale: it.rationale,
         // The node screenshot for EVERY comment (jobs already carry it; this
         // makes clarification + skipped comments show a preview too).

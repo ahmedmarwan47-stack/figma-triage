@@ -25,6 +25,9 @@
   },
 
   "slack": {
+    "//enabled": "Master switch for Slack output (digest + per-clarification messages). false = dashboard-only: the run still classifies, drafts, and writes jobs/ files, it just doesn't post to Slack. Flip true to resume Slack notifications.",
+    "enabled": false,
+
     "//channelLabel": "Cosmetic — shown in logs. The real destination is the SLACK_WEBHOOK_URL secret.",
     "channelLabel": "#figma-triage"
   },

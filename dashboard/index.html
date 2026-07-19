@@ -202,14 +202,51 @@
   .catchip[aria-pressed="true"] { border-color: var(--ink); color: var(--ink); font-weight: 570; }
   .catchip .n { color: var(--muted); font-variant-numeric: tabular-nums; }
 
+  /* List/Board toggle */
+  .viewtoggle { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .viewtoggle .vbtn {
+    font: inherit; font-size: 12.5px; color: var(--ink-2); background: var(--surface);
+    border: 0; padding: 5px 12px; cursor: pointer;
+  }
+  .viewtoggle .vbtn + .vbtn { border-left: 1px solid var(--border); }
+  .viewtoggle .vbtn[aria-pressed="true"] { background: var(--page); color: var(--ink); font-weight: 570; }
+
   /* ---------- inbox ---------- */
+  /* Project group = a Figma folder (mirrors how the PM groups by client). */
+  .projgroup { margin-bottom: 28px; }
+  .projgroup > .phead {
+    display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+    margin: 0 2px 12px; padding-bottom: 7px; border-bottom: 1px solid var(--border);
+  }
+  .projgroup > .phead h2 { font-size: 15px; font-weight: 680; margin: 0; color: var(--ink); }
+  .projgroup > .phead .n { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
   .filegroup { margin-bottom: 22px; }
+  .projgroup .filegroup { margin-left: 4px; }
   .filegroup > .ghead {
     display: flex; align-items: baseline; gap: 10px;
     margin: 0 2px 8px; flex-wrap: wrap;
   }
   .filegroup > .ghead h3 { font-size: 13px; font-weight: 620; margin: 0; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-2); }
   .filegroup > .ghead .n { font-size: 12px; color: var(--muted); }
+
+  /* Board view: category columns (mirrors the PM's kanban). */
+  .board { display: grid; grid-template-columns: repeat(var(--board-cols, 4), minmax(0, 1fr)); gap: 14px; align-items: start; }
+  .boardcol { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 10px; }
+  .boardcol > .colhead {
+    display: flex; align-items: center; gap: 8px; margin: 2px 2px 10px;
+    font-size: 12.5px; font-weight: 620; color: var(--ink);
+  }
+  .boardcol > .colhead .dot { width: 9px; height: 9px; border-radius: 50%; }
+  .boardcol > .colhead .n { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; font-weight: 500; }
+  .boardcol .item { background: var(--page); border: 1px solid var(--border); border-radius: 10px; padding: 10px; margin-bottom: 10px; flex-direction: column; gap: 8px; }
+  .boardcol .item .thumb { width: 100%; }
+  .boardcol .item .thumb img { max-height: 96px; }
+  .boardcol .emptycol { color: var(--muted); font-size: 12.5px; padding: 8px 2px; }
+  /* Where a card lives — shown on board cards (which lose the file grouping). */
+  .cardloc { font-size: 11.5px; color: var(--muted); display: flex; gap: 6px; flex-wrap: wrap; align-items: baseline; margin-bottom: 2px; }
+  .cardloc .sep { opacity: .5; }
+  /* Comment age chip (freshness at a glance, like the PM's age labels). */
+  .agechip { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
   .item { display: flex; gap: 14px; }
   .item .thumb { flex: none; width: 168px; }
@@ -394,6 +431,9 @@
     .item { flex-direction: column; }
     .item .thumb { width: 100%; }
     .item .thumb img { max-height: 260px; }
+    /* Board drops to two columns on tablets; board cards keep their column layout. */
+    .board { grid-template-columns: 1fr 1fr; }
+    .boardcol .item { flex-direction: column; }
   }
 
   /* ---------- phone layout ---------- */
@@ -428,6 +468,10 @@
     }
     .filters .chips { flex-basis: 100%; }
     .catchip { padding: 7px 13px; font-size: 13.5px; }
+    .viewtoggle { flex-basis: 100%; }
+    .viewtoggle .vbtn { flex: 1; padding: 9px 12px; font-size: 14px; }
+    /* Board stacks: one column at a time on phones. */
+    .board { grid-template-columns: 1fr; }
 
     /* Item actions wrap to full width so buttons are easy to hit. */
     .item .thumb img { max-height: 380px; max-width: 100%; object-fit: contain; }
@@ -491,8 +535,13 @@
   <div class="filters fade" id="filters">
     <select id="runSelect" title="Which run to show"></select>
     <div class="chips" id="catChips" role="group" aria-label="Filter by category"></div>
+    <select id="projectSelect" title="Filter by project (Figma folder)"></select>
     <select id="fileSelect" title="Filter by Figma file"></select>
     <input type="search" id="searchBox" placeholder="Search comments, replies, ops…" />
+    <div class="viewtoggle" role="group" aria-label="Inbox layout">
+      <button id="viewList" class="vbtn" aria-pressed="true" title="Group by project and file">List</button>
+      <button id="viewBoard" class="vbtn" aria-pressed="false" title="Board columns by category">Board</button>
+    </div>
   </div>
 
   <div id="inbox" class="fade"></div>
@@ -1233,6 +1282,21 @@ function fmtDayLabel(dateStr) {
   return new Intl.DateTimeFormat("en", { month: "short", day: "numeric", timeZone: "UTC" })
     .format(new Date(Date.UTC(y, m - 1, d)));
 }
+// Compact "how long ago" for a comment's created_at (mirrors the PM's age labels).
+function relativeAge(iso) {
+  if (!iso) return null;
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return null;
+  const days = Math.floor((Date.now() - then) / 86400000);
+  if (days <= 0) return "today";
+  if (days === 1) return "1d";
+  if (days < 7) return `${days}d`;
+  if (days < 30) return `${Math.floor(days / 7)}w`;
+  if (days < 365) return `${Math.floor(days / 30)}mo`;
+  return `${Math.floor(days / 365)}y`;
+}
+// A file's project (folder). Files with no project (explicit fileKeys) bucket here.
+const NO_PROJECT = "Other files";
 // Next weekday 14:00 Cairo, as a Date (approximate across DST — display only).
 function nextRunInstant() {
   const dayFmt = new Intl.DateTimeFormat("en-US", { timeZone: CAIRO, weekday: "short" });
@@ -1263,7 +1327,7 @@ let state = {
   // `requests` holds explicit clicks (mechanical Apply + picked creative
   // directions). The executor writes status/appliedAt/error back and commits.
   applyQueue: { attended: false, requests: {} },
-  filters: { run: "latest", cat: "all", file: "all", q: "" },
+  filters: { run: "latest", cat: "all", project: "all", file: "all", q: "", view: "list" },
 };
 
 function buildItems(dayData) {
@@ -1285,6 +1349,8 @@ function buildItems(dayData) {
       jobTitle: r.jobTitle || (job && job.job && job.job.title) || null,
       fileName: r.file || (job && job.fileName) || "Unknown file",
       fileKey: r.fileKey || (job && job.fileKey) || null,
+      project: r.project || (job && job.project) || null,
+      createdAt: r.createdAt || (job && job.createdAt) || null,
       commentId: r.commentId || (job && job.commentId) || null,
       link: (job && job.link) || r.link || null,
       imageUrl: (job && job.imageUrl) || r.imageUrl || null,
@@ -1296,9 +1362,10 @@ function buildItems(dayData) {
   for (const j of jobs) {
     if (taken.has(j)) continue;
     items.push({
-      category: j.category, comment: j.commentText || "", author: "", rationale: "",
+      category: j.category, comment: j.commentText || "", author: j.commentAuthor || "", rationale: "",
       reply: null, jobTitle: j.job && j.job.title, fileName: j.fileName || "Unknown file",
       fileKey: j.fileKey, commentId: j.commentId, link: j.link, imageUrl: j.imageUrl,
+      project: j.project || null, createdAt: j.createdAt || null,
       ops: j.job ? j.job.ops || [] : null, options: j.options, date: dayData.date,
     });
   }
@@ -1573,8 +1640,10 @@ function setFilter(patch) {
   const f = state.filters;
   if (f.run !== "latest") h.set("run", f.run);
   if (f.cat !== "all") h.set("cat", f.cat);
+  if (f.project !== "all") h.set("project", f.project);
   if (f.file !== "all") h.set("file", f.file);
   if (f.q) h.set("q", f.q);
+  if (f.view !== "list") h.set("view", f.view);
   const hash = h.toString();
   history.replaceState(null, "", hash ? "#" + hash : location.pathname + location.search);
   renderFilters();
@@ -1586,8 +1655,10 @@ function readHash() {
   state.filters = {
     run: h.get("run") || "latest",
     cat: h.get("cat") || "all",
+    project: h.get("project") || "all",
     file: h.get("file") || "all",
     q: h.get("q") || "",
+    view: h.get("view") === "board" ? "board" : "list",
   };
 }
 
@@ -1628,15 +1699,30 @@ function renderFilters() {
     chips.append(mkChip(c.id, c.label, CAT_COLOR(c.id), count));
   }
 
+  // Project filter (Figma folders). Populated from whatever's in this run.
+  const projSel = $("projectSelect");
+  projSel.replaceChildren();
+  projSel.append(el("option", { value: "all", text: "All projects" }));
+  const projects = [...new Set(runItems.map((i) => i.project || NO_PROJECT))].sort();
+  for (const p of projects) projSel.append(el("option", { value: p, text: p }));
+  projSel.value = f.project;
+  if (projSel.value !== f.project) { projSel.value = "all"; f.project = "all"; }
+
+  // File filter — scoped to the chosen project so the list stays short.
   const fileSel = $("fileSelect");
   fileSel.replaceChildren();
   fileSel.append(el("option", { value: "all", text: "All files" }));
-  const files = [...new Set(runItems.map((i) => i.fileName))].sort();
+  const fileScope = f.project === "all" ? runItems : runItems.filter((i) => (i.project || NO_PROJECT) === f.project);
+  const files = [...new Set(fileScope.map((i) => i.fileName))].sort();
   for (const name of files) fileSel.append(el("option", { value: name, text: name }));
   fileSel.value = f.file;
   if (fileSel.value !== f.file) { fileSel.value = "all"; f.file = "all"; }
 
   if ($("searchBox").value !== f.q) $("searchBox").value = f.q;
+
+  // View toggle reflects state.
+  $("viewList").setAttribute("aria-pressed", String(f.view !== "board"));
+  $("viewBoard").setAttribute("aria-pressed", String(f.view === "board"));
 }
 
 /* ============================== render: ops ============================== */
@@ -1708,6 +1794,7 @@ function opsFold(ops, summaryText) {
 function itemMatches(it) {
   const f = state.filters;
   if (f.cat !== "all" && it.category !== f.cat) return false;
+  if (f.project !== "all" && (it.project || NO_PROJECT) !== f.project) return false;
   if (f.file !== "all" && it.fileName !== f.file) return false;
   if (f.q) {
     const q = f.q.toLowerCase();
@@ -1720,15 +1807,29 @@ function itemMatches(it) {
   return true;
 }
 
-function renderItem(it, { showRunTag }) {
+function renderItem(it, { showRunTag, showLoc } = {}) {
   const latestDate = state.days.length ? state.days[state.days.length - 1].date : null;
   const isPending = it.date === latestDate && (it.ops && it.ops.length || (it.options || []).some((o) => (o.ops || []).length));
   const cat = CATEGORIES.find((c) => c.id === it.category) || { label: it.category };
+  const age = relativeAge(it.createdAt);
 
   const body = el("div", { class: "body" });
+
+  // On the board, cards lose the project/file grouping — show where each lives.
+  if (showLoc) {
+    const key = it.fileKey;
+    body.append(el("div", { class: "cardloc" },
+      it.project ? el("span", { text: it.project }) : null,
+      it.project ? el("span", { class: "sep", text: "·" }) : null,
+      key
+        ? el("a", { href: `https://www.figma.com/design/${encodeURIComponent(key)}/`, target: "_blank", rel: "noopener" }, it.fileName)
+        : el("span", { text: it.fileName })));
+  }
+
   const top = el("div", { class: "itemtop" },
     el("span", { class: "badge" }, el("span", { class: "dot", style: `background:${CAT_COLOR(it.category)}` }), cat.label),
     showRunTag ? el("span", { class: "runtag", text: `run ${fmtDayLabel(it.date)}` }) : null,
+    age ? el("span", { class: "agechip", text: age }) : null,
     isPending ? el("span", { class: "pendingtag", text: "● pending in plugin" }) : null,
     queueChip(it),
   );
@@ -1877,22 +1978,70 @@ function renderInbox() {
     return;
   }
 
-  const byFile = new Map();
+  if (state.filters.view === "board") {
+    inbox.append(renderBoard(items, showRunTag));
+  } else {
+    renderListView(inbox, items, showRunTag);
+  }
+}
+
+// List view: group by project (Figma folder) → file, mirroring how the PM
+// organizes by client. Files with no project fall under "Other files".
+function renderListView(inbox, items, showRunTag) {
+  const byProject = new Map();
   for (const it of items) {
-    if (!byFile.has(it.fileName)) byFile.set(it.fileName, []);
-    byFile.get(it.fileName).push(it);
+    const p = it.project || NO_PROJECT;
+    if (!byProject.has(p)) byProject.set(p, []);
+    byProject.get(p).push(it);
   }
-  for (const [fileName, group] of byFile) {
-    const key = group.find((g) => g.fileKey)?.fileKey;
-    const ghead = el("div", { class: "ghead" },
-      el("h3", { text: fileName }),
-      el("span", { class: "n", text: `${group.length} comment${group.length === 1 ? "" : "s"}` }),
-      key ? el("a", { href: `https://www.figma.com/design/${encodeURIComponent(key)}/`, target: "_blank", rel: "noopener", style: "font-size:12px" }, "open file ↗") : null,
-    );
-    const wrap = el("div", { class: "filegroup" }, ghead);
-    for (const it of group) wrap.append(renderItem(it, { showRunTag }));
-    inbox.append(wrap);
+  const projects = [...byProject.keys()].sort((a, b) =>
+    a === NO_PROJECT ? 1 : b === NO_PROJECT ? -1 : a.localeCompare(b));
+
+  for (const project of projects) {
+    const pItems = byProject.get(project);
+    const pg = el("div", { class: "projgroup" },
+      el("div", { class: "phead" },
+        el("h2", { text: project }),
+        el("span", { class: "n", text: `${pItems.length} comment${pItems.length === 1 ? "" : "s"}` })));
+
+    const byFile = new Map();
+    for (const it of pItems) {
+      if (!byFile.has(it.fileName)) byFile.set(it.fileName, []);
+      byFile.get(it.fileName).push(it);
+    }
+    for (const [fileName, group] of byFile) {
+      const key = group.find((g) => g.fileKey)?.fileKey;
+      const ghead = el("div", { class: "ghead" },
+        el("h3", { text: fileName }),
+        el("span", { class: "n", text: `${group.length} comment${group.length === 1 ? "" : "s"}` }),
+        key ? el("a", { href: `https://www.figma.com/design/${encodeURIComponent(key)}/`, target: "_blank", rel: "noopener", style: "font-size:12px" }, "open file ↗") : null,
+      );
+      const wrap = el("div", { class: "filegroup" }, ghead);
+      for (const it of group) wrap.append(renderItem(it, { showRunTag }));
+      pg.append(wrap);
+    }
+    inbox.append(pg);
   }
+}
+
+// Board view: one column per category (the PM's kanban), cards flow within.
+function renderBoard(items, showRunTag) {
+  const board = el("div", { class: "board" });
+  for (const c of CATEGORIES) {
+    const colItems = items.filter((it) => it.category === c.id);
+    const col = el("div", { class: "boardcol" },
+      el("div", { class: "colhead" },
+        el("span", { class: "dot", style: `background:${CAT_COLOR(c.id)}` }),
+        c.label,
+        el("span", { class: "n", text: String(colItems.length) })));
+    if (!colItems.length) {
+      col.append(el("div", { class: "emptycol", text: "—" }));
+    } else {
+      for (const it of colItems) col.append(renderItem(it, { showRunTag, showLoc: true }));
+    }
+    board.append(col);
+  }
+  return board;
 }
 
 /* ============================== boot ============================== */
@@ -1921,7 +2070,11 @@ $("tableToggle").addEventListener("click", () => {
   $("tableToggle").setAttribute("aria-expanded", String(!t.hidden));
 });
 $("runSelect").addEventListener("change", (e) => setFilter({ run: e.target.value }));
+// Changing project resets the file filter (its options are project-scoped).
+$("projectSelect").addEventListener("change", (e) => setFilter({ project: e.target.value, file: "all" }));
 $("fileSelect").addEventListener("change", (e) => setFilter({ file: e.target.value }));
+$("viewList").addEventListener("click", () => setFilter({ view: "list" }));
+$("viewBoard").addEventListener("click", () => setFilter({ view: "board" }));
 let searchTimer = null;
 $("searchBox").addEventListener("input", (e) => {
   clearTimeout(searchTimer);

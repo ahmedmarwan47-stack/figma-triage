@@ -48,15 +48,18 @@ export async function getProjectFiles(token, projectId) {
 /**
  * Resolve the full set of file keys to scan: explicit config.fileKeys plus
  * every file discovered by walking each configured team → projects → files.
- * Returns [{ key, name }]. Explicit fileKeys start with `name = key`; we
- * upgrade to the real file name via `GET /v1/files/:key?depth=1` (cheap —
- * depth=1 skips the full document tree).
+ * Returns [{ key, name, project }]. `project` is the Figma project (folder)
+ * the file lives in — the dashboard groups by it, mirroring how the PM
+ * organizes by client. Explicit fileKeys have `project = null` (we can't know
+ * their folder without an extra call) and start with `name = key`; we upgrade
+ * to the real file name via `GET /v1/files/:key?depth=1` (cheap — depth=1
+ * skips the full document tree).
  */
 export async function resolveFiles(token, { teamIds = [], fileKeys = [] }) {
   const byKey = new Map();
 
   for (const key of fileKeys) {
-    if (key && !byKey.has(key)) byKey.set(key, { key, name: key });
+    if (key && !byKey.has(key)) byKey.set(key, { key, name: key, project: null });
   }
 
   for (const teamId of teamIds) {
@@ -64,7 +67,9 @@ export async function resolveFiles(token, { teamIds = [], fileKeys = [] }) {
     for (const project of projects) {
       const files = await getProjectFiles(token, project.id);
       for (const f of files) {
-        if (!byKey.has(f.key)) byKey.set(f.key, { key: f.key, name: f.name });
+        if (!byKey.has(f.key)) {
+          byKey.set(f.key, { key: f.key, name: f.name, project: project.name ?? null });
+        }
       }
     }
   }

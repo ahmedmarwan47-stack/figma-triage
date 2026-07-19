@@ -589,6 +589,7 @@ async function main() {
         node,
         thread: replies,
         localStyles: threadStyles,
+        models: config.models ?? {},
       });
 
       processed++;

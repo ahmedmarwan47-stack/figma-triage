@@ -87,10 +87,15 @@ is OAuth-bound to a Claude runtime), so the dashboard *queues* and the executor 
    (+ `error`), commit + push `jobs/apply-queue.json` so the dashboard's Refresh shows it.
 5. NEVER edit original design nodes — clones on `Claude Comments` only, exactly like the plugin.
 
-The models involved: **drafting** (classification + ops) happens in the triage workflow via the
-`claude` CLI with no `--model` flag → the CLI's default model for the account. **Applying** is
-deterministic — the plugin executes ops with no model at all; the MCP executor's model only
-translates the already-drafted ops into Plugin API calls.
+The models involved: **drafting** runs in two stages (`reporter/llm.mjs`), each with its own model
+from `config.json → models` (passed to the `claude` CLI `--model`): **(1) classify** picks the
+category and writes the clarification reply — default `claude-opus-4-8` (the linchpin: strongest
+judgment on the one cheap call that decides everything); **(2) draft** the edit — `mechanical` →
+`claude-sonnet-5` (fast, reliable on structured ops), `creative` → `claude-opus-4-8` (visual
+judgment + rich op lists). Blank = the CLI's account default; a rejected model ID degrades that
+comment to clarification. **Applying** is deterministic — the plugin executes ops with no model at
+all; the MCP executor's model only translates the already-drafted ops into Plugin API calls, so
+apply quality is fixed at draft time regardless of which model applies.
 
 ## Op vocabulary (MUST stay in sync in two places)
 Prompt in `reporter/llm.mjs` (what Claude may emit) ↔ interpreter in `plugin/code.js` (`runOps`, what executes):

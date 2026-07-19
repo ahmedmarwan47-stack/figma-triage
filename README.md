@@ -208,6 +208,44 @@ figma.includeAllUnresolved` is still `true` (test mode — flip to `false` for m
 - Annotations: no REST endpoint exists (`/v1/files/:key/annotations` → 404, verified). If wanted, the path is plugin-side reading of `figma.annotations` POSTed to the worker.
 - Possible next upgrades discussed: Figma `FILE_COMMENT` webhooks into the worker for near-real-time triage (needs paid team plan); batching all comments into one claude call per run (token efficiency).
 
+## OPEN TASK — evaluate Mitch's PM as a comment source (RUN THIS FROM A LOCAL `claude` SESSION)
+Mitch added a **design-studio** feature at `https://pm.mitchdesigns.com/design-studio` that
+"checks the whole team's files and syncs open/resolved comments in real time." It may replace the
+weakest parts of this pipeline (hardcoded `fileKeys`, once-a-day Figma-REST polling, @-mention
+guessing). We want to see what it exposes and decide what to wire in.
+
+**Why this can't run in the cloud / web session (verified):**
+- The cloud environment's egress **blocks `pm.mitchdesigns.com`** — the request 403s at the proxy
+  CONNECT tunnel, never reaching the origin (allowlist is GitHub/Figma/npm/etc.).
+- A cloud session has **no access to your logged-in browser** — it runs in an isolated container
+  with none of your cookies/session. So it cannot see anything behind the PM's login.
+
+**So do the recon from a LOCAL `claude` session on your own Mac**, where it uses *your* network and
+a browser *you're* signed into:
+1. Locally: `git clone`/`git pull` this repo, `cd figma-triage`, run **`claude`** (the CLI on your
+   machine, not the web app).
+2. Ask it to open `pm.mitchdesigns.com/design-studio` **in a browser where you're logged in**
+   (drive Chrome via computer-use, or Playwright launched against your existing Chrome profile so the
+   session cookie is present — or just log in when prompted). **READ-ONLY: capture, never click
+   anything that creates/edits/resolves/deletes.** This is recon, not a change.
+3. Capture specifically:
+   - What design-studio does and shows (the whole-team file list; the real-time open/resolved comment
+     view).
+   - Whether each comment carries **assignee / "primary designer"** (the signal that a comment is
+     Ahmed's) and **open vs resolved** state.
+   - Any **API / Webhooks / Integrations / Developer / API-keys** page — endpoints, auth style, event
+     hooks. This is the difference between "screenshot recon" and "real integration."
+   - Any export or real-time push (SSE/websocket/webhook) mechanism.
+4. Write findings to **`notes/pm-design-studio.md`** (screenshots to `notes/`), then commit + push so
+   the next **cloud** session can act on them. **Do not commit PM credentials/tokens** — note only
+   that a token exists and where it's configured.
+
+**What we'd do with it** (for the local session's context): swap our "which comments are Ahmed's, and
+are they still open" logic from Figma-REST heuristics to the PM's real-time, assignment-aware feed;
+source the watched-file list from the team files instead of `config.json → fileKeys`; and, if events
+exist, trigger triage on a new/unresolved comment instead of the daily poll. Bring back enough detail
+(API shape, auth, event model) to judge which of these is worth building.
+
 ## For the next Claude Code session
 - **Branches:** the daily pipeline work happened on `claude/tool-dev-markdown-files-f1716j`; the
   dashboard + Pages deploy + live actions landed on `claude/dashboard-build-features-na7kfp`

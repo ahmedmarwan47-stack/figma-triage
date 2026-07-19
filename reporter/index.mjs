@@ -196,11 +196,45 @@ function buildThreads(comments) {
   }));
 }
 
+// Who a single message mentions. `me` = it @-mentions Ahmed (possibly ALONGSIDE
+// others in the same message). `others` = it @-mentions at least one person who
+// isn't Ahmed. Both can be true ("@Ahmed @Mark do X"). We count "@" that begins
+// a mention token and compare against how many of those are Ahmed's — so a
+// message naming other people but not Ahmed reads as others-only.
+function mentionMeta(text, handles) {
+  const t = (text || "").toLowerCase();
+  // Positions of every "@" that begins a mention token.
+  const atPositions = [];
+  const re = /@(?=[\w])/g;
+  for (let m; (m = re.exec(t)) !== null; ) atPositions.push(m.index);
+  // Positions that are MINE. A set, so overlapping aliases ("Ahmed Marwan" and
+  // "Ahmed") both resolving to the same "@Ahmed Marwan" count once — otherwise
+  // a co-mention like "@Ahmed Marwan @Mark" would wrongly read as me-only.
+  const mine = new Set();
+  for (const h of handles) {
+    if (!h) continue;
+    const needle = `@${h.toLowerCase()}`;
+    for (let i = t.indexOf(needle); i !== -1; i = t.indexOf(needle, i + needle.length)) mine.add(i);
+  }
+  return { me: mine.size > 0, others: atPositions.length > mine.size };
+}
+
+// A thread is Ahmed's if he's mentioned in the head OR any reply.
 function mentionsUser(thread, handles) {
-  const haystack = [thread.head.message, ...thread.replies.map((r) => r.message)]
-    .join(" ")
-    .toLowerCase();
-  return handles.some((h) => h && haystack.includes(`@${h.toLowerCase()}`));
+  if (mentionMeta(thread.head.message, handles).me) return true;
+  return thread.replies.some((r) => mentionMeta(r.message, handles).me);
+}
+
+// The replies that belong to Ahmed's view of a thread. Kept: replies mentioning
+// him (even with others) and replies mentioning nobody (a follow-up on his
+// comment). Dropped: replies that mention only OTHER people — those are notes to
+// developers, not for Ahmed. This runs before inclusion + activity checks, so a
+// thread doesn't get re-surfaced just because a dev note landed in it.
+function forAhmedReplies(replies, handles) {
+  return replies.filter((r) => {
+    const m = mentionMeta(r.message, handles);
+    return m.me || !m.others;
+  });
 }
 
 function latestActivity(thread) {
@@ -522,6 +556,15 @@ async function main() {
       ...buildThreads(comments),
       ...annotations.map((a) => ({ head: a, replies: [] })),
     ]
+      // Strip developer-note replies (mention only other people, not Ahmed)
+      // up front, so both the inclusion + activity checks below and the context
+      // fed to Claude see only what's actually for Ahmed. Annotations have no
+      // replies, so this is a no-op for them.
+      .map((t) =>
+        t.head._isAnnotation
+          ? t
+          : { head: t.head, replies: forAhmedReplies(t.replies, handles) },
+      )
       .filter((t) => !t.head.resolved_at)
       .filter(
         (t) =>

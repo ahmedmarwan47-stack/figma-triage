@@ -3,6 +3,13 @@
   "runAtHour": 14,
   "lookbackHoursFirstRun": 24,
 
+  "//models": "Model per drafting stage (passed to the claude CLI --model). classify picks the category AND writes the clarification reply (the linchpin — one cheap call); mechanical/creative then draft that category's edit with their own model. Blank/omitted = the CLI's account default. Accepts full IDs (claude-opus-4-8, claude-sonnet-5) or aliases (opus, sonnet). If an ID is rejected the comment degrades to clarification — fix it here.",
+  "models": {
+    "classify": "claude-opus-4-8",
+    "mechanical": "claude-sonnet-5",
+    "creative": "claude-opus-4-8"
+  },
+
   "figma": {
     "//teamIds": "TODO(config): paste team IDs (the number in figma.com/files/team/<ID>/...). Auto-discovers every file in the team.",
     "teamIds": [],

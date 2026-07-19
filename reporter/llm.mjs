@@ -1,13 +1,57 @@
 // Classification + drafting via the Claude Code CLI in headless print mode.
 // This draws on Ahmed's Claude subscription (CLAUDE_CODE_OAUTH_TOKEN in CI,
 // or his logged-in session locally) — no separate API billing.
-// One call per comment. Returns a structured verdict.
+//
+// Two stages so each can use its own model (config.json → models):
+//   1. classify → { category, rationale, reply? }   (models.classify)
+//   2. draft the job/options for that category        (models.mechanical|creative)
+// clarification + not_for_ahmed finish in stage 1 (no ops to draft).
+// Returns a structured verdict.
 
 import { spawn } from "node:child_process";
 
-// The op vocabulary here MUST stay in sync with plugin/code.js — the plugin
-// only knows how to execute these ops. Keep them declarative (no raw JS).
-const SYSTEM_PROMPT = `You triage Figma comments for Ahmed, a freelance web/UI designer, and draft his response for each one. You must respect his working principles in every drafted edit and every line of copy.
+// Two stages, so mechanical and creative drafts can use different models:
+//   1. CLASSIFY_SYSTEM_PROMPT — pick the category (+ draft the reply for
+//      clarification). Cheap, judgment-heavy — the linchpin.
+//   2. DRAFT_SYSTEM_PROMPT — given the category, draft the job (mechanical) or
+//      options (creative). Routed to the per-category model.
+// The op vocabulary in DRAFT_SYSTEM_PROMPT MUST stay in sync with plugin/code.js.
+
+const CLASSIFY_SYSTEM_PROMPT = `You triage Figma comments for Ahmed, a freelance web/UI designer. Your ONLY job here is to CLASSIFY each comment into exactly one category, and — ONLY for a clarification — draft his reply. Do NOT draft edits, ops, or direction options; a separate step does that.
+
+CLASSIFY each comment as exactly one category. Bias toward MECHANICAL — the goal
+of this pipeline is to auto-execute drafted edits. Only fall back to clarification
+when the comment is TRULY ambiguous about what to do.
+
+- "mechanical": a directive with a clear action and a clear target. This includes
+  copy swaps with quoted new text ('change this text to "X"', 'make this "Y"'),
+  style swaps ('make this blue', 'increase the padding'), sizing ('make the photos
+  bigger'), gallery/layout requests, and removals ('delete this section'). CRITICAL:
+  if the user typed a specific string in quotes, that string IS the new copy. Do NOT
+  second-guess spelling, capitalization, or word choice — 'make this "private testing"'
+  means the text becomes exactly 'private testing', even if you think it "should" be
+  'Private Tasting'. Their literal word is authoritative. Do NOT route to clarification
+  just because a color name is unusual or a phrasing looks quirky.
+- "creative": needs judgment on visual direction ('make this feel more premium',
+  'try a different hero direction', 'flip to light mode').
+- "clarification": TRULY ambiguous — no clear target, no clear action, or
+  contradicts an earlier decision in the thread. Example: 'this one too' with
+  no other context, or 'not sure about this'. Draft a suggested reply in Ahmed's voice.
+- "not_for_ahmed": mentions Ahmed but is really a coworker's responsibility.
+  Flag and skip.
+
+EDITORIAL VOICE (only for a clarification reply):
+- First-person, past-tense, specific over generic, name the tradeoff.
+- Banned: "leveraged", "unpacked", "surfaced", "crafted a bold new experience", and design-thinking filler.
+
+OUTPUT — respond with ONLY a single JSON object, no prose, no markdown fences:
+{
+  "category": "mechanical" | "creative" | "clarification" | "not_for_ahmed",
+  "rationale": "<one short sentence on why this category>",
+  "reply": null | "<first-person suggested reply — ONLY when category is clarification, else null>"
+}`;
+
+const DRAFT_SYSTEM_PROMPT = `You draft Ahmed's Figma edit for a comment that has ALREADY been classified (the category is given to you). You must respect his working principles in every drafted edit and every line of copy.
 
 DESIGN PRINCIPLES (for any mechanical edit you draft):
 - Auto layout on every frame; never free-floating nodes.
@@ -17,31 +61,9 @@ DESIGN PRINCIPLES (for any mechanical edit you draft):
 - 12px text floor. SVG icons at 16 / 20 / 24 only.
 - Text color is a separate paint style from the text style.
 
-EDITORIAL VOICE (for any drafted copy or reply):
+EDITORIAL VOICE (for any drafted copy):
 - First-person, past-tense, specific over generic, name the tradeoff.
 - Banned: "leveraged", "unpacked", "surfaced", "crafted a bold new experience", and design-thinking filler.
-
-CLASSIFY each comment as exactly one category. Bias toward MECHANICAL — the goal
-of this pipeline is to auto-execute drafted edits. Only fall back to clarification
-when the comment is TRULY ambiguous about what to do.
-
-- "mechanical": a directive with a clear action and a clear target. This includes
-  copy swaps with quoted new text ('change this text to "X"', 'make this "Y"'),
-  style swaps ('make this blue', 'increase the padding'), and removals ('delete
-  this section'). CRITICAL: if the user typed a specific string in quotes, that
-  string IS the new copy. Do NOT second-guess spelling, capitalization, or word
-  choice — 'make this "private testing"' means set the text to exactly
-  'private testing', even if you think it "should" be 'Private Tasting'. Their
-  literal word is authoritative. Similarly, don't route to clarification just
-  because a color name is unusual or a phrasing looks quirky.
-- "creative": needs judgment on visual direction ('make this feel more premium',
-  'try a different hero direction', 'flip to light mode'). Draft 2–3 labeled
-  direction options.
-- "clarification": TRULY ambiguous — no clear target, no clear action, or
-  contradicts an earlier decision in the thread. Example: 'this one too' with
-  no other context, or 'not sure about this'. Draft a suggested reply in Ahmed's voice.
-- "not_for_ahmed": mentions Ahmed but is really a coworker's responsibility.
-  Flag and skip.
 
 MECHANICAL JOB — op vocabulary (the ONLY ops the plugin can run; emit nothing else):
 - { "op": "duplicateTarget" }                                  // clone the commented node into the review frame (usually the first op)
@@ -79,13 +101,10 @@ MECHANICAL JOB — op vocabulary (the ONLY ops the plugin can run; emit nothing 
 
 OUTPUT — respond with ONLY a single JSON object, no prose, no markdown fences:
 {
-  "category": "mechanical" | "creative" | "clarification" | "not_for_ahmed",
-  "rationale": "<one short sentence on why this category>",
   "job": null | { "title": "<short description>", "targetNodeId": "<node id or null>", "ops": [ ...ops ] },
-  "options": null | [ { "label": "<short name>", "caption": "<one-sentence explanation of the direction>", "ops": [ ...ops ], "aiPrompt": "<prompt Ahmed can paste into Figma's native AI agent>" } ],
-  "reply": null | "<first-person suggested reply text>"
+  "options": null | [ { "label": "<short name>", "caption": "<one-sentence explanation of the direction>", "ops": [ ...ops ], "aiPrompt": "<prompt Ahmed can paste into Figma's native AI agent>" } ]
 }
-Only the field matching the category is populated; the others are null. For "mechanical" set "job". For "creative" set "options". For "clarification" set "reply". For "not_for_ahmed" leave all three null.
+Populate ONLY the field for the GIVEN category: "mechanical" → set "job" (options null); "creative" → set "options" as 2–3 labeled directions (job null). Never emit both.
 
 CREATIVE "ops" — each direction option MUST include an "ops" array that COMPILES
 that direction into the same op vocabulary, so the plugin can execute the
@@ -146,7 +165,7 @@ function distanceRounded(a, b) {
   return Math.round(Math.hypot(a.x - b.x, a.y - b.y));
 }
 
-function buildUserPrompt({ fileName, comment, node, thread, localStyles }) {
+function buildContext({ fileName, comment, node, thread, localStyles }, { includeStyles }) {
   const replies = (thread ?? [])
     .map((r) => `  - ${r.user?.handle ?? "someone"}: ${r.message}`)
     .join("\n");
@@ -208,12 +227,25 @@ ATTACHED NODE: ${nodeSummary}
 TARGET NODE ID: ${comment.client_meta?.node_id ?? "none"}
 ${pinLine}
 ${inventoryHeader}
-${textInventory}
-${stylesBlock}
+${textInventory}${includeStyles ? `\n${stylesBlock}` : ""}
 THREAD REPLIES:
-${replies || "  (none)"}
+${replies || "  (none)"}`;
+}
 
-Classify and draft per your instructions. Respond with only the JSON object.`;
+// Stage 1: classification needs the comment, thread, and enough node structure
+// to judge whether the target is resolvable — but not the full style lists.
+function buildClassifyPrompt(input) {
+  return `${buildContext(input, { includeStyles: false })}
+
+Classify this comment per your instructions. Respond with only the JSON object.`;
+}
+
+// Stage 2: drafting for an already-decided category — full context incl. styles.
+function buildDraftPrompt(input, category) {
+  return `${buildContext(input, { includeStyles: true })}
+
+CATEGORY (already decided): ${category}
+Draft ONLY the ${category === "creative" ? '"options" (2–3 directions)' : '"job"'} for this category. Respond with only the JSON object.`;
 }
 
 function parseVerdict(text) {
@@ -229,13 +261,13 @@ function parseVerdict(text) {
 // result envelope; we pull `.result` then extract our JSON from it.
 // stdin is set to /dev/null ("ignore") so the CLI doesn't sit waiting on a
 // non-TTY pipe in CI (which otherwise fails the call).
-function callClaude(userPrompt) {
+function callClaude(systemPrompt, userPrompt, model) {
   return new Promise((resolve, reject) => {
-    const child = spawn(
-      "claude",
-      ["-p", userPrompt, "--output-format", "json", "--system-prompt", SYSTEM_PROMPT],
-      { stdio: ["ignore", "pipe", "pipe"], env: process.env },
-    );
+    const args = ["-p", userPrompt, "--output-format", "json", "--system-prompt", systemPrompt];
+    // Per-stage model (e.g. sonnet for mechanical, opus for creative/classify).
+    // Blank/omitted → the claude CLI's default model for the account.
+    if (model) args.push("--model", model);
+    const child = spawn("claude", args, { stdio: ["ignore", "pipe", "pipe"], env: process.env });
     let out = "";
     let err = "";
     child.stdout.on("data", (d) => (out += d));
@@ -303,11 +335,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // The claude CLI occasionally exits 1 with empty stderr in CI (transient —
 // three comments in one run degraded to clarification for no real reason).
 // Retry with backoff before falling back.
-async function callClaudeWithRetry(userPrompt, attempts = 3) {
+async function callClaudeWithRetry(systemPrompt, userPrompt, model, attempts = 3) {
   let lastErr;
   for (let i = 0; i < attempts; i++) {
     try {
-      return await callClaude(userPrompt);
+      return await callClaude(systemPrompt, userPrompt, model);
     } catch (err) {
       lastErr = err;
       if (i < attempts - 1) {
@@ -320,10 +352,41 @@ async function callClaudeWithRetry(userPrompt, attempts = 3) {
   throw lastErr;
 }
 
+const CATEGORIES = ["mechanical", "creative", "clarification", "not_for_ahmed"];
+
 export async function classifyAndDraft(input) {
+  const models = input.models ?? {};
   try {
-    const text = await callClaudeWithRetry(buildUserPrompt(input));
-    const verdict = parseVerdict(text);
+    // Stage 1 — classify (+ reply for clarification), with the classify model.
+    const clsText = await callClaudeWithRetry(
+      CLASSIFY_SYSTEM_PROMPT, buildClassifyPrompt(input), models.classify,
+    );
+    const cls = parseVerdict(clsText);
+    const category = CATEGORIES.includes(cls.category) ? cls.category : "clarification";
+    const rationale = cls.rationale ?? "";
+
+    // not_for_ahmed and clarification need no ops — done in one call.
+    if (category === "not_for_ahmed") {
+      return { category, rationale, job: null, options: null, reply: null };
+    }
+    if (category === "clarification") {
+      return {
+        category, rationale, job: null, options: null,
+        reply: cls.reply || "I want to make sure I get this right — could you clarify what you'd like changed here?",
+      };
+    }
+
+    // Stage 2 — draft the job/options with the per-category model.
+    const draftText = await callClaudeWithRetry(
+      DRAFT_SYSTEM_PROMPT, buildDraftPrompt(input, category), models[category],
+    );
+    const draft = parseVerdict(draftText);
+    const verdict = {
+      category, rationale,
+      job: category === "mechanical" ? (draft.job ?? null) : null,
+      options: category === "creative" ? (draft.options ?? null) : null,
+      reply: null,
+    };
     return sanitizeAgainstStyles(verdict, input.localStyles);
   } catch (err) {
     // Never crash the whole run on one bad call — degrade to a clarification.

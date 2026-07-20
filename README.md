@@ -1,13 +1,26 @@
 # Figma comment triage
 
-An external, self-firing Figma comment triage — no Claude Code session required for the daily runs.
+An external Figma comment triage: it discovers new unresolved Figma comments, classifies + drafts a response to each with Claude, and publishes **apply-ready jobs** that a companion **Figma plugin** (or a Claude executor) applies on a `Claude Comments` page — reviewed from a **web dashboard**.
 
-Every weekday at **14:00 Africa/Cairo** a cloud job discovers new unresolved Figma comments, classifies + drafts a response to each with Claude, posts a **Slack digest**, and publishes **apply-ready jobs** that a companion **Figma plugin** executes on a `Claude Comments` page with one click per edit. Ambiguous comments become two-way Slack threads: reply in Slack to either clarify to Claude (re-triage) or post your reply into the Figma thread.
+> ## ⚙️ Current testing status (2026-07-20)
+> We're testing dashboard-first, with the noisy/automatic parts deliberately **OFF**. Nothing runs or applies on its own.
+>
+> | Feature | State | How to turn on |
+> |---|---|---|
+> | **Auto-schedule** (daily 2pm Cairo cron) | **OFF** — manual only | uncomment `schedule:` in `.github/workflows/triage.yml` |
+> | **Slack** (digest + clarification messages) | **OFF** — dashboard only | `config.json → slack.enabled: true` |
+> | **Auto-apply** (attended mode) | **OFF** | dashboard **Attended** toggle → `jobs/apply-queue.json` |
+> | **Team-wide discovery** | **ON** — all Mitch Designs team files | `config.json → figma.teamIds` |
+> | **Mention filter** (only comments that @-mention you) | **ON** | `config.json → figma.includeAllUnresolved` |
+>
+> So today: triage runs **only when you click "Run triage now"** (or dispatch the workflow), scans the whole Mitch team for comments that mention you, writes drafts to `jobs/`, and shows them on the dashboard. No Slack, no auto-apply, no schedule. See [Instant apply via Claude](#instant-apply-via-claude-attended-mode--apply-queue) to apply drafts on demand.
+
+Ambiguous comments can still become two-way Slack threads **when Slack is on**: reply in Slack to either clarify to Claude (re-triage) or post your reply into the Figma thread.
 
 A **web dashboard** (`dashboard/index.html`, deployed to GitHub Pages) sits on top of all this: monitor every run, trigger triage on demand, and clarify-to-Claude or reply-in-Figma per comment — from any machine you're signed into GitHub on. See [Dashboard](#dashboard-dashboardindexhtml).
 
 ```
-reporter/        GitHub Action, cron @ 14:00 Cairo (weekdays), also workflow_dispatch (force)
+reporter/        GitHub Action, workflow_dispatch (manual) — daily cron is OFF while testing
    discover (Figma REST) → classify+draft (claude CLI) → Slack digest → jobs/latest.json
 plugin/          Figma plugin "Claude Comments", installed once, confirm-then-apply
    fetches jobs/latest.json → Apply buttons execute drafted ops on a "Claude Comments" page
@@ -49,6 +62,14 @@ would skip everything in between. It still writes `jobs/<date>.json` +
 `latest.json` so the drafts reach the plugin. The dashboard's **Run triage now**
 button opens a small picker (Since last run / Today only / Today & yesterday /
 Last N days / Custom range) that fills these inputs.
+
+## Which comments count as yours (mentions & threads)
+Discovery walks every file in `config.json → figma.teamIds` (the whole Mitch Designs team) plus any explicit `fileKeys`. Within each file, a comment thread is triaged only if it's **yours**, decided at the reply level (`reporter/index.mjs → mentionMeta` / `mentionsUser` / `forAhmedReplies`):
+
+- **Include a thread** if you're `@`-mentioned in the **head OR any reply** — so a reply that pulls you into a thread surfaces it even if the original comment wasn't addressed to you.
+- **Keep** replies that mention **you** (even alongside others — `@You @Mark do X` still counts) and replies that mention **nobody** (a follow-up on your comment).
+- **Drop** replies that mention **only other people** — those are notes to developers, not for you. Dropped *before* the activity check, so a thread isn't re-surfaced just because a dev note landed in it, and Claude's context excludes them.
+- Your handle comes from `GET /v1/me`; add aliases/variants in `config.json → figma.extraHandles`. Set `includeAllUnresolved: true` to bypass all of this and triage every unresolved comment (noisy — off by default).
 
 ## Instant apply via Claude (attended mode + apply queue)
 The dashboard can hand edits to a **Claude executor** — a Claude session (or scheduled job)
@@ -272,11 +293,17 @@ view over everything the pipeline publishes:
   triaged, ops drafted.
 - **Activity chart** — comments per run day stacked by category, with tooltips and a table view.
   Clicking a bar filters the inbox to that run.
-- **Inbox** — every triaged comment grouped by file, filterable by run / category / file / free
-  text (filters sync to the URL hash, so views are shareable). Mechanical cards show the drafted
-  ops as readable steps; creative cards show each direction with its op count and a
-  **Copy AI prompt** button; clarification cards show the drafted reply. "Pending in plugin"
-  marks what `latest.json` is currently serving to the plugin.
+- **Inbox** — every triaged comment, in one of two layouts (toggle, remembered in the URL hash):
+  - **List** (default) — grouped by **project (Figma folder) → file**, mirroring how the Mitch PM
+    organizes by client. Files with no project fall under *Other files*.
+  - **Board** — PM-style kanban: a column per category (Mechanical / Creative / Needs input /
+    Skipped); each card shows its `project · file` location.
+  Filterable by run / category / **project** / file / free text (the file filter is scoped to the
+  chosen project; all filters sync to the URL hash, so views are shareable). Every card shows the
+  comment **author** and an **age** chip (`today` / `3d` / `1w` / `1mo`), sourced from the comment's
+  Figma timestamp. Mechanical cards show the drafted ops as readable steps; creative cards show each
+  direction with its op count and a **Copy AI prompt** button; clarification cards show the drafted
+  reply. "Pending in plugin" marks what `latest.json` is currently serving to the plugin.
 - **Theme toggle** — System / Light / Dark, remembered per browser (stamps `data-theme`, wins
   over the OS setting both ways).
 - **Live actions** — a **Run triage now** button (opens a date-range picker — *Since last run* /

@@ -11,8 +11,8 @@
   },
 
   "figma": {
-    "//teamIds": "TODO(config): paste team IDs (the number in figma.com/files/team/<ID>/...). Auto-discovers every file in the team.",
-    "teamIds": [],
+    "//teamIds": "Team IDs (the number in figma.com/files/team/<ID>/...). Auto-discovers every file in the team. 1076153841164353645 = the Mitch Designs (Pro) team — holds all client projects (Apps, Corporate Websites, eCommerce, Landing Pages, Go Group, Resources). Ahmed is a member, so his PAT can walk it.",
+    "teamIds": ["1076153841164353645"],
 
     "//fileKeys": "Explicit files to watch (the code in figma.com/design/<KEY>/...). Seeded with the El Alsson case-study file.",
     "fileKeys": ["PlPSqmNnF1SEaZZn975sSz"],
@@ -20,11 +20,14 @@
     "//extraHandles": "Extra names/aliases that count as a mention of you, in addition to your Figma handle from GET /v1/me.",
     "extraHandles": [],
 
-    "//includeAllUnresolved": "If true, include every unresolved comment (not just ones mentioning you). Noisy — leave false. Temporarily TRUE for the first test run.",
-    "includeAllUnresolved": true
+    "//includeAllUnresolved": "If true, include every unresolved comment (not just ones mentioning you). Noisy — leave false. Set false now that team-wide discovery is on (walking ~205 team files with this true would triage every designer's comments).",
+    "includeAllUnresolved": false
   },
 
   "slack": {
+    "//enabled": "Master switch for Slack output (digest + per-clarification messages). false = dashboard-only: the run still classifies, drafts, and writes jobs/ files, it just doesn't post to Slack. Flip true to resume Slack notifications.",
+    "enabled": false,
+
     "//channelLabel": "Cosmetic — shown in logs. The real destination is the SLACK_WEBHOOK_URL secret.",
     "channelLabel": "#figma-triage"
   },

@@ -196,11 +196,45 @@ function buildThreads(comments) {
   }));
 }
 
+// Who a single message mentions. `me` = it @-mentions Ahmed (possibly ALONGSIDE
+// others in the same message). `others` = it @-mentions at least one person who
+// isn't Ahmed. Both can be true ("@Ahmed @Mark do X"). We count "@" that begins
+// a mention token and compare against how many of those are Ahmed's — so a
+// message naming other people but not Ahmed reads as others-only.
+function mentionMeta(text, handles) {
+  const t = (text || "").toLowerCase();
+  // Positions of every "@" that begins a mention token.
+  const atPositions = [];
+  const re = /@(?=[\w])/g;
+  for (let m; (m = re.exec(t)) !== null; ) atPositions.push(m.index);
+  // Positions that are MINE. A set, so overlapping aliases ("Ahmed Marwan" and
+  // "Ahmed") both resolving to the same "@Ahmed Marwan" count once — otherwise
+  // a co-mention like "@Ahmed Marwan @Mark" would wrongly read as me-only.
+  const mine = new Set();
+  for (const h of handles) {
+    if (!h) continue;
+    const needle = `@${h.toLowerCase()}`;
+    for (let i = t.indexOf(needle); i !== -1; i = t.indexOf(needle, i + needle.length)) mine.add(i);
+  }
+  return { me: mine.size > 0, others: atPositions.length > mine.size };
+}
+
+// A thread is Ahmed's if he's mentioned in the head OR any reply.
 function mentionsUser(thread, handles) {
-  const haystack = [thread.head.message, ...thread.replies.map((r) => r.message)]
-    .join(" ")
-    .toLowerCase();
-  return handles.some((h) => h && haystack.includes(`@${h.toLowerCase()}`));
+  if (mentionMeta(thread.head.message, handles).me) return true;
+  return thread.replies.some((r) => mentionMeta(r.message, handles).me);
+}
+
+// The replies that belong to Ahmed's view of a thread. Kept: replies mentioning
+// him (even with others) and replies mentioning nobody (a follow-up on his
+// comment). Dropped: replies that mention only OTHER people — those are notes to
+// developers, not for Ahmed. This runs before inclusion + activity checks, so a
+// thread doesn't get re-surfaced just because a dev note landed in it.
+function forAhmedReplies(replies, handles) {
+  return replies.filter((r) => {
+    const m = mentionMeta(r.message, handles);
+    return m.me || !m.others;
+  });
 }
 
 function latestActivity(thread) {
@@ -522,6 +556,15 @@ async function main() {
       ...buildThreads(comments),
       ...annotations.map((a) => ({ head: a, replies: [] })),
     ]
+      // Strip developer-note replies (mention only other people, not Ahmed)
+      // up front, so both the inclusion + activity checks below and the context
+      // fed to Claude see only what's actually for Ahmed. Annotations have no
+      // replies, so this is a no-op for them.
+      .map((t) =>
+        t.head._isAnnotation
+          ? t
+          : { head: t.head, replies: forAhmedReplies(t.replies, handles) },
+      )
       .filter((t) => !t.head.resolved_at)
       .filter(
         (t) =>
@@ -610,9 +653,11 @@ async function main() {
         commentId: thread.head.id,
         fileName: file.name,
         fileKey: file.key,
+        project: file.project ?? null,
         link: fileLink(file.key, nodeId),
         commentAuthor: thread.head.user?.handle ?? "someone",
         commentText: thread.head.message,
+        createdAt: thread.head.created_at ?? null,
         rationale: verdict.rationale ?? "",
         imageUrl,
         verdict,
@@ -627,10 +672,13 @@ async function main() {
           commentId: thread.head.id,
           fileKey: file.key,
           fileName: file.name,
+          project: file.project ?? null,
           nodeId,
           imageUrl,
           category,
           commentText: thread.head.message,
+          commentAuthor: thread.head.user?.handle ?? "someone",
+          createdAt: thread.head.created_at ?? null,
           link: fileLink(file.key, nodeId),
           job: verdict.job ?? null,
           options: verdict.options ?? null,
@@ -661,26 +709,37 @@ async function main() {
     buckets.creative.length +
     buckets.clarification.length;
 
+  // Slack is opt-in. When disabled (config.slack.enabled === false) we're in
+  // dashboard-only mode: still classify, draft, and write jobs/ below — just
+  // skip every Slack post. Default true keeps back-compat if the flag is absent.
+  const slackEnabled = config.slack?.enabled !== false;
   const botToken = process.env.SLACK_BOT_TOKEN;
   const channelId = process.env.SLACK_CHANNEL_ID;
   const botMode = !!(botToken && channelId);
 
-  const digestPayload =
-    totalActionable === 0 && buckets.not_for_ahmed.length === 0
-      ? `*Figma triage — ${today}*\nNo new mentions today.`
-      : formatDigest({
-          date: today,
-          buckets,
-          clarificationsInline: !botMode,
-        });
-  await sendDigest({ botMode, botToken, channelId, payload: digestPayload });
-  if (botMode) {
-    // Each clarification gets its OWN message carrying a ref marker. A thread
-    // reply on that message is routed back to the matching Figma comment by
-    // worker/ and consumed on the next run.
-    for (const it of buckets.clarification) {
-      await postSlackBot(botToken, channelId, formatClarificationMessage(it));
+  if (slackEnabled) {
+    const digestPayload =
+      totalActionable === 0 && buckets.not_for_ahmed.length === 0
+        ? `*Figma triage — ${today}*\nNo new mentions today.`
+        : formatDigest({
+            date: today,
+            buckets,
+            clarificationsInline: !botMode,
+          });
+    await sendDigest({ botMode, botToken, channelId, payload: digestPayload });
+    if (botMode) {
+      // Each clarification gets its OWN message carrying a ref marker. A thread
+      // reply on that message is routed back to the matching Figma comment by
+      // worker/ and consumed on the next run.
+      for (const it of buckets.clarification) {
+        await postSlackBot(botToken, channelId, formatClarificationMessage(it));
+      }
     }
+  } else {
+    console.log(
+      `[slack] disabled (config.slack.enabled=false) — dashboard-only. ` +
+        `${totalActionable} actionable item(s) written to jobs/, no Slack post.`,
+    );
   }
 
   // Full triage record (all categories, including the drafts that don't become
@@ -694,8 +753,10 @@ async function main() {
         commentId: it.commentId,
         file: it.fileName,
         fileKey: it.fileKey,
+        project: it.project ?? null,
         author: it.commentAuthor,
         comment: it.commentText,
+        createdAt: it.createdAt ?? null,
         rationale: it.rationale,
         // The node screenshot for EVERY comment (jobs already carry it; this
         // makes clarification + skipped comments show a preview too).

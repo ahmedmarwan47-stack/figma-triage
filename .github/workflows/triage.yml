@@ -1,11 +1,13 @@
 name: Figma comment triage
 
 on:
-  schedule:
-    # UTC-only cron. 14:00 Africa/Cairo is 12:00 UTC in winter (UTC+2) and
-    # 11:00 UTC in summer (UTC+3), so we fire at both and let the reporter's
-    # local-hour guard pick the right one. Weekdays only.
-    - cron: "0 11,12 * * 1-5"
+  # ── Auto-schedule is OFF for now (manual-only while testing). ──────────────
+  # Triage runs ONLY when you trigger it (the dashboard's "Run triage now", or
+  # Actions → Run workflow). To resume the daily 2pm-Cairo run, uncomment the
+  # `schedule` block below. The reporter's own local-hour guard already picks
+  # 14:00 Africa/Cairo from the two UTC fires (12:00 winter / 11:00 summer).
+  # schedule:
+  #   - cron: "0 11,12 * * 1-5"   # weekdays; both winter+summer UTC offsets
   workflow_dispatch:
     inputs:
       force:

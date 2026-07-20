@@ -3,6 +3,9 @@
   "runAtHour": 14,
   "lookbackHoursFirstRun": 24,
 
+  "//scheduleEnabled": "Display-only mirror of the workflow cron for the dashboard. Keep in sync with .github/workflows/triage.yml: false = the `schedule:` block is commented out (manual-only), true = the daily cron is active. Does NOT control the cron itself — GitHub reads that from the workflow.",
+  "scheduleEnabled": false,
+
   "//models": "Model per drafting stage (passed to the claude CLI --model). classify picks the category AND writes the clarification reply (the linchpin — one cheap call); mechanical/creative then draft that category's edit with their own model. Blank/omitted = the CLI's account default. Accepts full IDs (claude-opus-4-8, claude-sonnet-5) or aliases (opus, sonnet). If an ID is rejected the comment degrades to clarification — fix it here.",
   "models": {
     "classify": "claude-opus-4-8",

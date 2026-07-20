@@ -1448,9 +1448,15 @@ function renderStatus() {
   strip.append(el("span", { class: "chip", title: gen || "" },
     "Last run ", el("b", { text: gen ? `${fmtCairo(gen)} Cairo` : "—" }),
     gen ? ` · ${relTime(gen)}` : ""));
-  const nxt = nextRunInstant();
-  strip.append(el("span", { class: "chip", title: "Weekdays at 14:00 Africa/Cairo" },
-    "Next run ", el("b", { text: nxt ? `${fmtCairo(nxt.toISOString(), { weekday: "short" })} Cairo` : "weekdays 14:00 Cairo" })));
+  const scheduleOn = !state.config || state.config.scheduleEnabled !== false;
+  if (scheduleOn) {
+    const nxt = nextRunInstant();
+    strip.append(el("span", { class: "chip", title: "Weekdays at 14:00 Africa/Cairo" },
+      "Next run ", el("b", { text: nxt ? `${fmtCairo(nxt.toISOString(), { weekday: "short" })} Cairo` : "weekdays 14:00 Cairo" })));
+  } else {
+    strip.append(el("span", { class: "chip", title: "The daily schedule is off (manual-only while testing). Use 'Run triage now'." },
+      "Schedule ", el("b", { text: "manual only" })));
+  }
   if (state.cursor && state.cursor.lastRunDate) {
     strip.append(el("span", { class: "chip", title: "reporter/state.json — comments before this cursor are already processed" },
       "Cursor ", el("b", { text: state.cursor.lastRunDate })));
@@ -1475,6 +1481,7 @@ function renderTiles() {
   const tiles = $("tiles");
   tiles.replaceChildren();
   const latestItems = state.days.length ? state.days[state.days.length - 1].items : [];
+  const slackOn = !!(state.config && state.config.slack && state.config.slack.enabled);
   const pendingJobs = (state.latest && state.latest.jobs || []).length;
   const needsInput = latestItems.filter((i) => i.category === "clarification").length;
   const allItems = state.days.flatMap((d) => d.items);
@@ -1494,7 +1501,9 @@ function renderTiles() {
     tile("Pending drafts", pendingJobs,
       pendingJobs ? "waiting for Apply in the Figma plugin" : "nothing waiting in the plugin"),
     tile("Needs your input", needsInput,
-      needsInput ? "reply in the Slack thread to unblock" : "no open questions",
+      needsInput
+        ? (slackOn ? "reply in the Slack thread to unblock" : "reply on a card below to unblock")
+        : "no open questions",
       needsInput ? "clarification" : null),
     tile("Comments triaged", allItems.length, `across ${runsWithData} recorded run${runsWithData === 1 ? "" : "s"}`),
     tile("Ops drafted", opsCount, "one-click edit steps compiled"),
@@ -1923,11 +1932,14 @@ function renderItem(it, { showRunTag, showLoc } = {}) {
   }
 
   if (it.category === "clarification" && it.reply) {
+    const slackOn = !!(state.config && state.config.slack && state.config.slack.enabled);
     body.append(el("div", { class: "replybox" },
       el("div", { class: "rlabel", text: "Drafted reply (not posted)" }), it.reply));
     body.append(el("div", { class: "itemactions" },
       el("button", { class: "btn small", onclick: () => copyText(it.reply, "Reply") }, "Copy reply"),
-      el("span", { class: "hint" }, "answer the ❓ Slack thread — or ", el("code", { text: "figma: …" }), " to post there"),
+      slackOn
+        ? el("span", { class: "hint" }, "answer the ❓ Slack thread — or ", el("code", { text: "figma: …" }), " to post there")
+        : el("span", { class: "hint" }, "use ", el("b", { text: "Reply / clarify" }), " below to re-triage, or ", el("b", { text: "Reply in Figma" }), " to post it"),
     ));
   }
 

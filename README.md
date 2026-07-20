@@ -287,8 +287,9 @@ exist, trigger triage on a new/unresolved comment instead of the daily poll. Bri
 A single self-contained HTML file (no build, no deps, no secrets) that gives a read-only
 view over everything the pipeline publishes:
 
-- **Status strip** — last run (Cairo time), next scheduled run, cursor from `reporter/state.json`,
-  watched-file count, and a ⚠ banner while `config.json → figma.includeAllUnresolved` is true.
+- **Status strip** — last run (Cairo time); schedule status (a next-run time when the cron is on, or
+  "Schedule manual only" when `config.json → scheduleEnabled` is false); cursor from
+  `reporter/state.json`; watched files/teams; and a ⚠ banner while `figma.includeAllUnresolved` is true.
 - **Stat tiles** — pending drafts in `jobs/latest.json`, open clarifications, all-time comments
   triaged, ops drafted.
 - **Activity chart** — comments per run day stacked by category, with tooltips and a table view.

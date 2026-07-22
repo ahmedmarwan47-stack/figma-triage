@@ -1,0 +1,70 @@
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body { font: 12px/1.5 Inter, -apple-system, system-ui, sans-serif; margin: 0; padding: 14px; }
+  h2 { font-size: 13px; margin: 0 0 2px; }
+  p.sub { margin: 0 0 12px; opacity: .65; }
+  .row { display: flex; gap: 8px; }
+  button {
+    padding: 8px 14px; border: 0; border-radius: 7px; font: inherit; font-weight: 600;
+    cursor: pointer; background: #0d99ff; color: #fff;
+  }
+  button.secondary { background: rgba(128,128,128,.18); color: inherit; font-weight: 500; }
+  button:disabled { opacity: .5; cursor: default; }
+  #log {
+    margin-top: 12px; height: 360px; overflow-y: auto; padding: 10px;
+    border: 1px solid rgba(128,128,128,.28); border-radius: 8px;
+    font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    white-space: pre-wrap; background: rgba(128,128,128,.06);
+  }
+  #log:empty::before { content: "Ready. Click \201CRewrite service pages\201D to begin."; opacity: .5; }
+  .line { display: block; }
+  .line.head { font-weight: 700; margin-top: 4px; }
+  .line.ok { color: #1a7f37; }
+  .line.warn { color: #b3261e; }
+  @media (prefers-color-scheme: dark) {
+    .line.ok { color: #4ac26b; }
+    .line.warn { color: #f2a49c; }
+  }
+</style>
+
+<h2>Service Page Content</h2>
+<p class="sub">Rewrites the 6 service pages to match their names, in the Motion Design voice. The Motion Design page is left untouched.</p>
+
+<div class="row">
+  <button id="run">Rewrite service pages</button>
+  <button id="close" class="secondary">Close</button>
+</div>
+
+<div id="log"></div>
+
+<script>
+  const logEl = document.getElementById('log');
+  const runBtn = document.getElementById('run');
+
+  document.getElementById('run').onclick = () => {
+    logEl.textContent = '';
+    parent.postMessage({ pluginMessage: { type: 'run' } }, '*');
+  };
+  document.getElementById('close').onclick = () => {
+    parent.postMessage({ pluginMessage: { type: 'close' } }, '*');
+  };
+
+  onmessage = (event) => {
+    const msg = event.data.pluginMessage;
+    if (!msg) return;
+    if (msg.type === 'running') {
+      runBtn.disabled = true;
+      runBtn.textContent = 'Working…';
+    } else if (msg.type === 'done') {
+      runBtn.disabled = false;
+      runBtn.textContent = 'Run again';
+    } else if (msg.type === 'log') {
+      const el = document.createElement('span');
+      el.className = 'line ' + (msg.kind || 'info');
+      el.textContent = msg.line;
+      logEl.appendChild(el);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+  };
+</script>
